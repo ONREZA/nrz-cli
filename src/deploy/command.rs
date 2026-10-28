@@ -412,6 +412,7 @@ pub(super) async fn run_install_step(
     execution_env: &[(String, String)],
     build_logs: Option<&BuildLogEmitter>,
     platform_runner: bool,
+    python_interpreter: Option<&Path>,
 ) -> anyhow::Result<InstallExecution> {
     let detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
@@ -513,6 +514,7 @@ pub(super) async fn run_install_step(
             std::env::consts::OS,
             std::env::consts::ARCH,
             python_minor,
+            python_interpreter,
         )
         .map_err(|error| {
             output::coded_error(
@@ -688,11 +690,8 @@ pub(super) fn resolve_install_command(
     }
     if uses_python_recipe(project_dir, effective) {
         let fs = crate::detect::fs::LocalFs::new(project_dir);
-        let minor = selected_build_toolchain(project_dir, effective)
-            .ok()?
-            .resolved_python_minor()?;
         return crate::detect::python::dependency_manifest(&fs)
-            .map(|manifest| crate::detect::python::install_command_for_minor(manifest, minor));
+            .map(crate::detect::python::install_command);
     }
     // Python defaults execute through the manifest recipe above; authored
     // commands retain authority. Shell-driven runtimes use the frozen command

@@ -50,6 +50,11 @@ fn producer_and_consumer_share_complete_layer_semantics() {
     for (config, target) in [
         (json!({}), None),
         (json!({"runtimeFamily":"PYTHON"}), Some("python-3.14")),
+        (json!({"runtimeFamily":"PYTHON"}), Some("python-3.11")),
+        (
+            json!({"applicationRuntime":{"family":"NODE","args":[]}}),
+            Some("node-23"),
+        ),
         (json!({"isBinaryEntry":true}), None),
         (
             json!({"applicationRuntime":{"family":"PYTHON","args":["MODULE","demo","two words"]},
@@ -365,4 +370,61 @@ fn requested_runtime_lineage_survives_compilation_and_changes_graph_identity() {
         digests.push(graph.graph_digest().to_string());
     }
     assert_ne!(digests[0], digests[1]);
+}
+
+#[test]
+fn family_only_source_targets_compile_and_roundtrip_without_numeric_facts() {
+    for (family, target, profile) in [("NODE", "node", "NODE"), ("PYTHON", "python", "CPYTHON")] {
+        let source = manifest(
+            json!({"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}),
+        );
+        let value =
+            compile_source_runtime_layer_for_target(&source.layers[0], &[], Some(target)).unwrap();
+        let runtime: nrz_runtime_artifact::RuntimeLayerWire =
+            serde_json::from_value(value).unwrap();
+        verify_source_runtime_layer_for_target(&source.layers[0], &runtime, Some(target)).unwrap();
+        assert_eq!(runtime.launch.unwrap().profile.to_string(), profile);
+        let graph = finalize_source_bundle_runtime_graph_for_target(
+            &"1".repeat(64),
+            &"2".repeat(64),
+            1,
+            &source,
+            &[],
+            Some(target),
+        )
+        .unwrap();
+        assert_eq!(
+            graph.wire().runtime_layers[0]
+                .launch
+                .as_ref()
+                .unwrap()
+                .profile
+                .to_string(),
+            profile
+        );
+    }
+}
+
+#[test]
+fn missing_compiler_witness_preserves_only_the_explicit_runtime_family() {
+    for (family, profile, target) in [
+        ("NODE", "NODE", "node-23"),
+        ("PYTHON", "CPYTHON", "python-3.11"),
+    ] {
+        let source = manifest(json!({"applicationRuntime":{"family":family,"args":["literal"]}}));
+        nrz_runtime_artifact::validate_source_bundle_application_graph(
+            &"a".repeat(64),
+            &"b".repeat(64),
+            1,
+            &source,
+        )
+        .unwrap();
+        let compiled =
+            compile_source_runtime_layer_for_target(&source.layers[0], &[], None).unwrap();
+        assert_eq!(compiled["launch"]["profile"], profile);
+        let mut witnessed = source.layers[0].clone();
+        witnessed.runtime_config.as_mut().unwrap()["buildRuntimeVersion"] = json!(target);
+        assert!(compile_source_runtime_layer_for_target(&witnessed, &[], None).is_err());
+        assert!(compile_source_runtime_layer_for_target(&witnessed, &[], Some(target)).is_ok());
+    }
 }

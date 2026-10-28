@@ -5,10 +5,10 @@ use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::{Context, bail};
-use pep508_rs::pep440_rs::{Operator, VersionSpecifiers};
+use pep508_rs::pep440_rs::{Operator, Version, VersionSpecifiers};
 use pep508_rs::{
     MarkerEnvironment, MarkerEnvironmentBuilder, MarkerTree, MarkerTreeKind, MarkerValueString,
-    Requirement,
+    MarkerValueVersion, Requirement,
 };
 
 use super::fs::Fs;
@@ -155,12 +155,33 @@ pub fn requires_dependency_stage_for_target(
     fs: &dyn Fs,
     minor: nrz_source_bundle::PythonMinor,
 ) -> anyhow::Result<bool> {
+    requires_dependency_stage_for_runtime(fs, Some(minor))
+}
+
+struct PythonDependencyTarget {
+    markers: MarkerEnvironment,
+    python_version_bounds: Option<(Version, Version)>,
+}
+
+/// A code-only artifact still has Linux platform facts without a compiler witness.
+pub fn requires_dependency_stage_for_runtime(
+    fs: &dyn Fs,
+    minor: Option<nrz_source_bundle::PythonMinor>,
+) -> anyhow::Result<bool> {
     if !requires_dependency_stage(fs)? {
         return Ok(false);
     }
+    // Placeholder values are guarded as unknown before marker evaluation.
+    let minor_version = minor.map_or_else(|| "0".into(), |minor| minor.version());
+    let lower = Version::from_str(&minor_version).context("invalid Python marker version")?;
+    let python_version_bounds = minor.map(|_| {
+        let release = lower.release();
+        let upper = Version::new([release[0], release[1] + 1]).with_dev(Some(0));
+        (lower, upper)
+    });
     let environment = MarkerEnvironment::try_from(MarkerEnvironmentBuilder {
         implementation_name: "cpython",
-        implementation_version: minor.exact_version(),
+        implementation_version: "0",
         os_name: "posix",
         platform_machine: "x86_64",
         platform_python_implementation: "CPython",
@@ -168,17 +189,23 @@ pub fn requires_dependency_stage_for_target(
         platform_release: "",
         platform_system: "Linux",
         platform_version: "",
-        python_full_version: minor.exact_version(),
-        python_version: minor.version(),
+        python_full_version: "0",
+        python_version: &minor_version,
         sys_platform: "linux",
     })
     .context("invalid frozen Python marker environment")?;
-    requires_dependency_stage_with_environment(fs, Some(&environment))
+    requires_dependency_stage_with_environment(
+        fs,
+        Some(&PythonDependencyTarget {
+            markers: environment,
+            python_version_bounds,
+        }),
+    )
 }
 
 fn requires_dependency_stage_with_environment(
     fs: &dyn Fs,
-    environment: Option<&MarkerEnvironment>,
+    environment: Option<&PythonDependencyTarget>,
 ) -> anyhow::Result<bool> {
     let plan = dependency_plan(fs)?;
     if plan.as_ref().is_some_and(|plan| plan.install_project) {
@@ -266,7 +293,7 @@ fn requires_dependency_stage_with_environment(
 
 fn poetry_requirement_applies_to_target(
     requirement: &toml::Value,
-    environment: &MarkerEnvironment,
+    environment: &PythonDependencyTarget,
 ) -> bool {
     if let Some(alternatives) = requirement.as_array() {
         return alternatives.is_empty()
@@ -329,6 +356,9 @@ fn poetry_requirement_applies_to_target(
                 }
                 _ => return true,
             };
+            if key == "python_full_version" {
+                return true;
+            }
             let marker = format!("{key} {} '{version}'", specifier.operator());
             let Some(result) = MarkerTree::parse_str::<url::Url>(&marker)
                 .ok()
@@ -340,6 +370,12 @@ fn poetry_requirement_applies_to_target(
         }
     }
     if let Some(marker) = requirement.get("markers") {
+        if marker
+            .as_str()
+            .is_some_and(has_unfrozen_python_version_marker)
+        {
+            return true;
+        }
         let Some(result) = marker
             .as_str()
             .and_then(|marker| MarkerTree::parse_str::<url::Url>(marker).ok())
@@ -352,23 +388,42 @@ fn poetry_requirement_applies_to_target(
     applies
 }
 
-fn requirement_applies_to_target(requirement: &str, environment: &MarkerEnvironment) -> bool {
+fn requirement_applies_to_target(requirement: &str, environment: &PythonDependencyTarget) -> bool {
     if requirement.trim().is_empty() {
         return false;
+    }
+    if has_unfrozen_python_version_marker(requirement) {
+        return true;
     }
     Requirement::<url::Url>::from_str(requirement).map_or(true, |requirement| {
         marker_applies_to_target(&requirement.marker, environment)
     })
 }
 
-fn marker_applies_to_target(marker: &MarkerTree, environment: &MarkerEnvironment) -> bool {
+fn has_unfrozen_python_version_marker(text: &str) -> bool {
+    // pep508 normalizes away pre/post releases; preserve unknown patch facts before parsing.
+    // shortcut: reserved text in literals stays unknown; tokenize only if real inputs need it.
+    text.contains("python_full_version") || text.contains("implementation_version")
+}
+
+fn marker_applies_to_target(marker: &MarkerTree, environment: &PythonDependencyTarget) -> bool {
     marker_matches_known_target(marker, environment).unwrap_or(true)
 }
 
 fn marker_matches_known_target(
     marker: &MarkerTree,
-    environment: &MarkerEnvironment,
+    environment: &PythonDependencyTarget,
 ) -> Option<bool> {
+    // pep508 normalizes python_version into python_full_version nodes.
+    // Raw patch expressions are guarded before parsing; simplify only witnessed minor facts.
+    let marker = if let Some((lower, upper)) = &environment.python_version_bounds {
+        marker.clone().simplify_python_versions(
+            std::ops::Bound::Included(lower),
+            std::ops::Bound::Excluded(upper),
+        )
+    } else {
+        marker.clone()
+    };
     let unknown_key = |key: &MarkerValueString| {
         matches!(
             key,
@@ -385,7 +440,18 @@ fn marker_matches_known_target(
         }
         match node.kind() {
             MarkerTreeKind::True | MarkerTreeKind::False => {}
-            MarkerTreeKind::Version(node) => pending.extend(node.edges().map(|(_, child)| child)),
+            MarkerTreeKind::Version(node) => {
+                if matches!(
+                    node.key(),
+                    MarkerValueVersion::ImplementationVersion
+                        | MarkerValueVersion::PythonFullVersion
+                ) || (environment.python_version_bounds.is_none()
+                    && matches!(node.key(), MarkerValueVersion::PythonVersion))
+                {
+                    return None;
+                }
+                pending.extend(node.edges().map(|(_, child)| child));
+            }
             MarkerTreeKind::String(node) => {
                 if unknown_key(node.key()) {
                     return None;
@@ -407,7 +473,7 @@ fn marker_matches_known_target(
             MarkerTreeKind::Extra(_) => return None,
         }
     }
-    Some(marker.evaluate(environment, &[]))
+    Some(marker.evaluate(&environment.markers, &[]))
 }
 
 pub fn dependency_names(fs: &dyn Fs) -> anyhow::Result<BTreeSet<String>> {
@@ -771,7 +837,11 @@ fn python_detection(
 }
 
 pub fn install_command(manifest: &str) -> String {
-    install_command_for_minor(manifest, nrz_source_bundle::PythonMinor::default())
+    if manifest == "requirements.txt" {
+        "python3 -m pip install --disable-pip-version-check --no-compile --requirement requirements.txt".into()
+    } else {
+        "python3 -m pip install --disable-pip-version-check --no-compile .".into()
+    }
 }
 
 pub fn install_command_for_minor(manifest: &str, minor: nrz_source_bundle::PythonMinor) -> String {

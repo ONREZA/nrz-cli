@@ -168,7 +168,7 @@ fn project(id: String) -> nrz_api::Project200Response3 {
             source_id: "22222222-2222-4222-8222-222222222222".parse().unwrap(),
             ..Default::default()
         }),
-        node_version: Some(nrz_api::Project200Response3NodeVersion::Node22),
+        node_version: Some("NODE_22".into()),
         package_manager: Some(nrz_api::ProjectRequestBodyPackageManager::Npm),
         root_directory: Some(".".into()),
         git_lfs_enabled: Some(false),

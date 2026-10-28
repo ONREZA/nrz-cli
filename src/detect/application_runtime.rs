@@ -26,7 +26,11 @@ struct RuntimeFramework {
 struct RuntimeDeploy {
     #[serde(skip)]
     framework_override: Option<String>,
-    python_version: Option<nrz_source_bundle::PythonMinor>,
+    #[serde(
+        default,
+        deserialize_with = "nrz_source_bundle::python::deserialize_python_version_declaration"
+    )]
+    python_version: Option<String>,
     runtime: Option<ApplicationRuntimeFamily>,
     #[serde(alias = "entrypoint")]
     entry: Option<String>,
@@ -128,11 +132,14 @@ pub(crate) fn bind_application_runtime(
                 {
                     *detection = super::python::detect_configured_python_framework(fs, slug);
                 }
-                let minor = declaration.python_version.unwrap_or_default();
+                let version = declaration
+                    .python_version
+                    .clone()
+                    .unwrap_or_else(|| nrz_source_bundle::PythonMinor::default().version());
                 detection.suggested_compute = super::types::ComputeType::Process;
                 detection.metadata.runtime.runtime_type = super::types::RuntimeType::Python;
-                detection.metadata.runtime.version = Some(minor.version().into());
-                bind_python_install_command(fs, detection, minor);
+                detection.metadata.runtime.version = Some(version);
+                bind_python_install_command(fs, detection);
             }
             ApplicationRuntimeFamily::Executable => {
                 detection.suggested_compute = super::types::ComputeType::Process;
@@ -186,7 +193,7 @@ pub fn resolve_application_runtime_with_project(
         RuntimeDeploy {
             framework_override: framework_override.map(str::to_string),
             runtime: deploy.runtime,
-            python_version: deploy.python_version,
+            python_version: deploy.python_version.clone(),
             entry: deploy.entry.clone(),
             args: deploy.args.clone(),
             module: deploy.module.clone(),
@@ -220,7 +227,11 @@ fn resolve_runtime(
         }, config.framework_override.as_deref())?.context("Python application entry is ambiguous or absent; declare deploy.entry, module or application")?;
         let declaration = ApplicationRuntimeDeclaration {
             family: ApplicationRuntimeFamily::Python,
-            python_version: Some(config.python_version.unwrap_or_default()),
+            python_version: Some(
+                config
+                    .python_version
+                    .unwrap_or_else(|| nrz_source_bundle::PythonMinor::default().version()),
+            ),
             entry: Some(launch.entry),
             args: launch.args,
         };
@@ -490,8 +501,8 @@ fn default_build_toolchain(
         family,
         python_version: (family == BuildToolchainFamily::Python).then(|| {
             serving
-                .and_then(|runtime| runtime.python_version)
-                .unwrap_or_default()
+                .and_then(|runtime| runtime.python_version.clone())
+                .unwrap_or_else(|| nrz_source_bundle::PythonMinor::default().version())
         }),
     }
 }
@@ -506,7 +517,7 @@ pub fn resolve_build_toolchain(
             .selected_runtime_family()
             .map(|family| ApplicationRuntimeDeclaration {
                 family,
-                python_version: config.deploy.python_version,
+                python_version: config.deploy.python_version.clone(),
                 entry: None,
                 args: vec![],
             });
@@ -517,8 +528,9 @@ pub fn resolve_build_toolchain(
             config
                 .build
                 .python_version
-                .or(config.deploy.python_version)
-                .unwrap_or_default()
+                .clone()
+                .or_else(|| config.deploy.python_version.clone())
+                .unwrap_or_else(|| nrz_source_bundle::PythonMinor::default().version())
         });
         if family != BuildToolchainFamily::Python && config.build.python_version.is_some() {
             bail!("build.python_version requires the Python build toolchain");
@@ -570,7 +582,7 @@ pub(crate) fn resolve_serving_python_minor(
     config: &crate::config::ProjectConfig,
     build_toolchain: &BuildToolchainDeclaration,
     explicit_compute: Option<super::types::ComputeType>,
-) -> anyhow::Result<Option<nrz_source_bundle::PythonMinor>> {
+) -> anyhow::Result<Option<String>> {
     if resolve_static_serving(detection, config, explicit_compute)? {
         return Ok(None);
     }
@@ -585,7 +597,7 @@ pub(crate) fn resolve_serving_python_minor(
     let inherited_minor = if family == Some(ApplicationRuntimeFamily::Python)
         || family.is_none() && super::python::is_python_framework(&detection.framework)
     {
-        build_toolchain.resolved_python_minor()
+        build_toolchain.python_version.clone()
     } else {
         None
     };
@@ -603,8 +615,9 @@ pub(crate) fn resolve_serving_python_minor(
         config
             .deploy
             .python_version
+            .clone()
             .or(inherited_minor)
-            .unwrap_or_default(),
+            .unwrap_or_else(|| nrz_source_bundle::PythonMinor::default().version()),
     ))
 }
 
@@ -690,7 +703,7 @@ pub fn bind_source_build_context(
     {
         detection.suggested_compute = super::types::ComputeType::Static;
     }
-    if let Some(minor) = context.build_toolchain.resolved_python_minor() {
+    if let Some(version) = context.build_toolchain.python_version.as_deref() {
         let python = super::python::detect_configured_python(fs);
         detection.metadata.package_manager = python.metadata.package_manager;
         if let Some(python_build) = python.metadata.build_info {
@@ -705,19 +718,15 @@ pub fn bind_source_build_context(
             .is_none_or(|runtime| runtime.family != ApplicationRuntimeFamily::Python)
         {
             detection.metadata.runtime.runtime_type = super::types::RuntimeType::Python;
-            detection.metadata.runtime.version = Some(minor.version().into());
+            detection.metadata.runtime.version = Some(version.to_owned());
         }
-        bind_python_install_command(fs, detection, minor);
+        bind_python_install_command(fs, detection);
     }
     detection.metadata.source_build_context = Some(context.clone());
     Ok(())
 }
 
-fn bind_python_install_command(
-    fs: &dyn Fs,
-    detection: &mut super::types::DetectionResult,
-    minor: nrz_source_bundle::PythonMinor,
-) {
+fn bind_python_install_command(fs: &dyn Fs, detection: &mut super::types::DetectionResult) {
     if detection
         .metadata
         .package_manager
@@ -726,7 +735,7 @@ fn bind_python_install_command(
         && let Some(build) = detection.metadata.build_info.as_mut()
         && let Some(manifest) = super::python::dependency_manifest(fs)
     {
-        build.install_command = Some(super::python::install_command_for_minor(manifest, minor));
+        build.install_command = Some(super::python::install_command(manifest));
     }
 }
 

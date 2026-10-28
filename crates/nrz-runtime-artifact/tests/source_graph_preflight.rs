@@ -9,6 +9,8 @@ fn source_launch_and_runtime_config_match_the_materialized_graph() {
         ("NODE", "node-22", "NODE_22", json!(["--port", "8080"])),
         ("NODE", "node-24", "NODE_24", json!(["--port", "8080"])),
         ("NODE", "node-26", "NODE_26", json!(["--port", "8080"])),
+        ("NODE", "node-23", "NODE_23", json!(["--port", "8080"])),
+        ("PYTHON", "python-3.11", "CPYTHON_3_11", json!([])),
     ] {
         let config = json!({
             "applicationRuntime": {"family": family, "args": args},
@@ -262,22 +264,24 @@ fn preflight_validates_typed_targets_without_attesting_the_final_admitted_target
     source.layers[0].runtime_config = Some(json!({"buildRuntimeVersion":"node-22"}));
     validate_source_bundle_application_graph(&"a".repeat(64), &"b".repeat(64), 1024, &source)
         .unwrap();
-    // Unresolved Node keeps its target-independent ownership preflight; final
-    // materialization still rejects it until a trusted target is supplied.
+    // Without a compiler witness, explicit Node keeps only its language family.
     source.layers[0].runtime_config = Some(json!({
         "applicationRuntime":{"family":"NODE","args":[]}
     }));
     validate_source_bundle_application_graph(&"a".repeat(64), &"b".repeat(64), 1024, &source)
         .unwrap();
-    assert!(
+    assert_eq!(
         nrz_runtime_artifact::source_layer_launch_for_target(
             source.layers[0].runtime_config.as_ref(),
             None,
         )
-        .is_err()
+        .unwrap()
+        .profile
+        .to_string(),
+        "NODE"
     );
     for (family, target) in [
-        ("PYTHON", "python-3.11"),
+        ("PYTHON", "node-24"),
         ("EXECUTABLE", "node-24"),
         ("NODE", "python-3.12"),
     ] {

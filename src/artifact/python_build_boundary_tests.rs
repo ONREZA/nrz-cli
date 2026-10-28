@@ -87,7 +87,7 @@ async fn published_build_python_dependencies_follow_serving_owner() {
                 (
                     authored,
                     if family == "PYTHON" {
-                        RuntimeArtifactScan::PythonRuntimeRoot(minor)
+                        RuntimeArtifactScan::PythonRuntimeRoot(Some(minor))
                     } else {
                         RuntimeArtifactScan::NodeRuntimeRoot
                     },

@@ -22,8 +22,12 @@ pub enum BuildToolchainFamily {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BuildToolchainDeclaration {
     pub family: BuildToolchainFamily,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub python_version: Option<PythonMinor>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::python::deserialize_python_version_declaration"
+    )]
+    pub python_version: Option<String>,
 }
 
 impl BuildToolchainDeclaration {
@@ -31,14 +35,21 @@ impl BuildToolchainDeclaration {
         if self.python_version.is_some() && self.family != BuildToolchainFamily::Python {
             return Err("build pythonVersion is only valid for the PYTHON toolchain".into());
         }
+        if let Some(version) = self.python_version.as_deref() {
+            crate::python::validate_runtime_version_declaration(version)?;
+        }
         Ok(())
     }
 
-    /// Admission must persist this resolved minor so future catalog defaults
-    /// cannot change an already frozen build snapshot.
+    /// Read an actual canonical minor from a resolved compiler context.
     pub fn resolved_python_minor(&self) -> Option<PythonMinor> {
         (self.family == BuildToolchainFamily::Python)
-            .then(|| self.python_version.unwrap_or_default())
+            .then(|| {
+                self.python_version
+                    .as_deref()
+                    .and_then(PythonMinor::from_version)
+            })
+            .flatten()
     }
 }
 

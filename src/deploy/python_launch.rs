@@ -10,44 +10,63 @@ use crate::detect::python_launch::{PYTHON_BOOTSTRAP_ENTRY, PythonLaunch};
 pub(crate) fn materialize_python_entry(
     project_dir: &Path,
     launch: &PythonLaunch,
-    minor: nrz_source_bundle::PythonMinor,
+    minor: Option<nrz_source_bundle::PythonMinor>,
 ) -> anyhow::Result<String> {
     if launch.entry != PYTHON_BOOTSTRAP_ENTRY {
         return Ok(launch.entry.clone());
     }
-    if let Some(mode) = launch.args.first() {
+    if minor.is_some() {
+        validate_python_server_dependencies(project_dir, &launch.args, minor)?;
+    }
+    let directory = project_dir.join(".onreza/python");
+    super::python_toolchain::ensure_python_directory(project_dir, &directory)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
+    // Known artifact roots retain their legacy startup; unknown roots come from the outer launch.
+    let bootstrap = if let Some(minor) = minor {
+        format!(
+            "{}\n{}",
+            nrz_runtime_artifact::PYTHON_SITE_PACKAGES_INITIALIZER,
+            PYTHON_BOOTSTRAP.replace("@SITE_PACKAGES_ROOT@", &minor.site_packages_root())
+        )
+    } else {
+        PYTHON_BOOTSTRAP.replace(
+            r#"onreza_add_site_packages(root / "@SITE_PACKAGES_ROOT@", source_paths)"#,
+            "sys.path.extend(str(path) for path in source_paths if str(path) not in sys.path)",
+        )
+    };
+    std::io::Write::write_all(&mut temporary, bootstrap.as_bytes())?;
+    temporary
+        .persist(project_dir.join(PYTHON_BOOTSTRAP_ENTRY))
+        .map_err(|error| error.error)?;
+    Ok(launch.entry.clone())
+}
+
+pub(crate) fn validate_python_server_dependencies(
+    project_dir: &Path,
+    args: &[String],
+    minor: Option<nrz_source_bundle::PythonMinor>,
+) -> anyhow::Result<()> {
+    if let Some(mode) = args.first() {
         let server = match mode.as_str() {
             "ASGI" => Some("uvicorn"),
             "WSGI" => Some("gunicorn"),
             _ => None,
         };
         if let Some(server) = server
-            && !project_dir
-                .join(minor.site_packages_root())
-                .join(server)
-                .join("__main__.py")
-                .is_file()
+            && !minor.is_some_and(|minor| {
+                project_dir
+                    .join(minor.site_packages_root())
+                    .join(server)
+                    .join("__main__.py")
+                    .is_file()
+            })
         {
             bail!(
                 "Python {mode} recipe requires {server} in installed production dependencies; add it with uv add {server}, poetry add {server}, or requirements.txt and reinstall (development-only dependencies are excluded)"
             );
         }
     }
-    let directory = project_dir.join(".onreza/python");
-    super::python_toolchain::ensure_python_directory(project_dir, &directory)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
-    // Preserve build-minor custody even when an authorized successor runtime
-    // later proves compatible with this artifact.
-    let bootstrap = format!(
-        "{}\n{}",
-        nrz_runtime_artifact::PYTHON_SITE_PACKAGES_INITIALIZER,
-        PYTHON_BOOTSTRAP.replace("@SITE_PACKAGES_ROOT@", minor.site_packages_root())
-    );
-    std::io::Write::write_all(&mut temporary, bootstrap.as_bytes())?;
-    temporary
-        .persist(project_dir.join(PYTHON_BOOTSTRAP_ENTRY))
-        .map_err(|error| error.error)?;
-    Ok(launch.entry.clone())
+    Ok(())
 }
 
 pub(crate) const PYTHON_BOOTSTRAP: &str = r#"import os

@@ -787,15 +787,27 @@ pub(crate) fn apply_application_runtime_manifest(
                     .runtime
                     .as_ref()
                     .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                    .or(match intent.family {
+                        nrz_source_bundle::ApplicationRuntimeFamily::Node => Some("node"),
+                        nrz_source_bundle::ApplicationRuntimeFamily::Python => Some("python"),
+                        _ => None,
+                    })
                     .ok_or_else(|| {
                         output::coded_error(
                             "APPLICATION_RUNTIME_INVALID",
                             "a sibling runtime requires its own frozen build target",
                         )
-                    })?;
+                    })?
+                    .to_owned();
                 intent
-                    .validate_target(Some(target))
+                    .validate_target(Some(&target))
                     .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
+                layer
+                    .runtime
+                    .as_mut()
+                    .expect("typed runtime exists")
+                    .build_runtime_version
+                    .get_or_insert(target);
                 continue;
             }
             if declaration.is_some_and(|declaration| declaration.intent() != *intent) {

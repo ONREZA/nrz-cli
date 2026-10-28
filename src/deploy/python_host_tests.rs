@@ -53,6 +53,7 @@ async fn incompatible_host_build_refuses_native_target_tree_before_compiler_sele
                 PythonInstallMode::ManagedLocal,
                 minor,
                 &[],
+                None,
                 (os, arch),
                 None,
             )
@@ -150,6 +151,7 @@ fn portable_wheel_recipe_rejects_native_payload_with_shared_host_evidence() {
             "linux",
             "x86_64",
             PythonMinor::default(),
+            None,
         )
         .unwrap();
         let qualification = commands
@@ -244,6 +246,7 @@ async fn assert_linux_libc_refuses_native_stage(glibc_version: Option<(u32, u32)
         PythonInstallMode::ManagedLocal,
         minor,
         &[],
+        None,
         ("linux", "x86_64"),
         glibc_version,
     )
@@ -367,6 +370,7 @@ fn actual_linux_host_libc_probe_qualifies_native_stage() {
 #[tokio::test]
 #[ignore = "selects each qualified Python compiler and executes authored build startup"]
 async fn real_python_build_startup_processes_pth_once() {
+    let uv = resolve_for(PythonInstallMode::ManagedLocal).await.unwrap();
     for minor in nrz_source_bundle::PythonMinor::ALL {
         let project = tempfile::tempdir().unwrap();
         let stage = project.path().join(minor.site_packages_root());
@@ -391,6 +395,7 @@ async fn real_python_build_startup_processes_pth_once() {
             super::super::python_toolchain_tests::qualification_mode(),
             minor,
             &[],
+            Some(&super::super::python_toolchain_tests::qualification_interpreter(&uv, minor)),
         )
         .await
         .unwrap();
@@ -408,4 +413,56 @@ async fn real_python_build_startup_processes_pth_once() {
             "['$(id)', 'two words']"
         );
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn python_compiler_probe_accepts_actual_minors_and_patches_outside_the_catalog() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = tempfile::tempdir().unwrap();
+    let interpreter = directory.path().join("python");
+    for (version, expected) in [("3.11.99", "3.11"), ("3.14.999", "3.14"), ("4.0.1", "4.0")] {
+        std::fs::write(
+            &interpreter,
+            format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let selected = probe_interpreter(&interpreter).await.unwrap();
+        assert_eq!(selected.path, interpreter.canonicalize().unwrap());
+        assert_eq!(selected.minor.version(), expected);
+    }
+    std::fs::write(&interpreter, "#!/bin/sh\nprintf 'not-cpython\\n'\n").unwrap();
+    assert!(probe_interpreter(&interpreter).await.is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn platform_build_verifies_the_admitted_minor_without_a_catalog_patch_gate() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = tempfile::tempdir().unwrap();
+    let interpreter = directory.path().join("python");
+    std::fs::write(&interpreter, "#!/bin/sh\nprintf '3.15.1\\n'\n").unwrap();
+    std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let error = build_environment_for_interpreter(
+        directory.path(),
+        PythonInstallMode::PinnedPlatform,
+        PythonMinor::Python314,
+        &interpreter,
+        &[],
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("differs from admitted compiler"));
+    assert!(!directory.path().join(".onreza/python/build").exists());
+    std::fs::write(&interpreter, "#!/bin/sh\nprintf '3.14.999\\n'\n").unwrap();
+    build_environment_for_interpreter(
+        directory.path(),
+        PythonInstallMode::PinnedPlatform,
+        PythonMinor::Python314,
+        &interpreter,
+        &[],
+    )
+    .await
+    .unwrap();
 }

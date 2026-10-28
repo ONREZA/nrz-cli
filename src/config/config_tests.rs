@@ -1029,7 +1029,7 @@ fn a_child_runtime_override_does_not_inherit_parent_python_fields() {
     for module_launch in [true, false] {
         let mut parent = ProjectConfig::default();
         parent.deploy.runtime = Some(Family::Python);
-        parent.deploy.python_version = Some(PythonMinor::Python312);
+        parent.deploy.python_version = Some(PythonMinor::Python312.version());
         if module_launch {
             parent.deploy.module = Some("main".into());
         } else {
@@ -1059,7 +1059,7 @@ fn a_child_runtime_override_does_not_inherit_parent_python_fields() {
                 let mut conflicting = child.clone();
                 match field {
                     "python_version" => {
-                        conflicting.deploy.python_version = Some(PythonMinor::Python313)
+                        conflicting.deploy.python_version = Some(PythonMinor::Python313.version())
                     }
                     "module" => conflicting.deploy.module = Some("main".into()),
                     "application" => conflicting.deploy.application = Some("main:app".into()),
@@ -1115,7 +1115,7 @@ fn a_child_python_launch_mode_replaces_competing_parent_modes() {
                     .unwrap();
                 assert_eq!(
                     declaration.python_version,
-                    Some(nrz_source_bundle::PythonMinor::Python312)
+                    Some(nrz_source_bundle::PythonMinor::Python312.version())
                 );
                 assert_eq!(merged.build.command.as_deref(), Some("parent-build"));
                 if expected_target == "child.py" {
@@ -1208,7 +1208,7 @@ fn a_child_python_server_selects_the_application_mode() {
         );
         assert_eq!(
             declaration.python_version,
-            Some(nrz_source_bundle::PythonMinor::Python312)
+            Some(nrz_source_bundle::PythonMinor::Python312.version())
         );
     }
 }
@@ -1225,7 +1225,7 @@ fn child_build_toolchain_selection_has_its_own_python_minor_boundary() {
     assert_eq!(merged.build.python_version, None);
     assert_eq!(
         merged.deploy.python_version,
-        Some(nrz_source_bundle::PythonMinor::Python314)
+        Some(nrz_source_bundle::PythonMinor::Python314.version())
     );
     let child: ProjectConfig = toml::from_str("[build]\npython_version='3.13'\n").unwrap();
     let merged = merged.merge_child(child);
@@ -1235,7 +1235,7 @@ fn child_build_toolchain_selection_has_its_own_python_minor_boundary() {
     );
     assert_eq!(
         merged.build.python_version,
-        Some(nrz_source_bundle::PythonMinor::Python313)
+        Some(nrz_source_bundle::PythonMinor::Python313.version())
     );
 }
 
@@ -1255,7 +1255,8 @@ fn child_runtime_families_own_their_entry_and_arguments() {
             parent.deploy.entry = Some("parent-entry".into());
             parent.deploy.args = Some(vec!["parent argument".into()]);
             if parent_family == Family::Python {
-                parent.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
+                parent.deploy.python_version =
+                    Some(nrz_source_bundle::PythonMinor::Python312.version());
             }
             let mut child = ProjectConfig::default();
             child.deploy.runtime = Some(child_family);
@@ -1321,7 +1322,7 @@ fn runtime_selection_distinguishes_implicit_python_from_an_unknown_parent_launch
         parent.deploy.entry = Some("main.py".into());
         parent.deploy.args = Some(vec!["literal argument".into()]);
         if implicit_python {
-            parent.deploy.python_version = Some(PythonMinor::Python312);
+            parent.deploy.python_version = Some(PythonMinor::Python312.version());
         }
         for family in [
             Family::Python,

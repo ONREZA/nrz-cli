@@ -179,14 +179,14 @@ fn shallow_selection_preserves_independent_compilers_and_incomplete_launches() {
         let build = resolve_build_toolchain(&detection, &config).unwrap();
         assert_eq!(
             resolve_serving_python_minor(&detection, &config, &build, None).unwrap(),
-            Some(minor)
+            Some(minor.version())
         );
         let missing = VirtualFs::from_json(r#"{"tree":["pyproject.toml"],"files":{"pyproject.toml":"[tool.poetry]\npackage-mode=false\n"}}"#).unwrap();
         let detection = super::detect_with_fs(&missing);
         let build = resolve_build_toolchain(&detection, &config).unwrap();
         assert_eq!(
             resolve_serving_python_minor(&detection, &config, &build, None).unwrap(),
-            Some(minor)
+            Some(minor.version())
         );
     }
 }

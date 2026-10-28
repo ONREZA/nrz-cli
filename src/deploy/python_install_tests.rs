@@ -32,7 +32,7 @@ async fn authored_python_install_cannot_publish_unqualified_native_dependencies(
             ));
             config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
             config.deploy.entry = Some("main.py".into());
-            config.deploy.python_version = Some(minor);
+            config.deploy.python_version = Some(minor.version());
             crate::deploy::test_support::write_project_config(project.path(), &config);
             let (command, args) =
                 crate::deploy::test_support::deploy_context(project.path(), &config, &[]);
@@ -88,7 +88,7 @@ async fn authored_python_install_preserves_pure_prebuilt_and_static_stage_bounda
             let mut config = nrz::config::ProjectConfig::default();
             config.build.output_directory = Some(".".into());
             config.build.toolchain = Some(nrz_source_bundle::BuildToolchainFamily::Python);
-            config.build.python_version = Some(minor);
+            config.build.python_version = Some(minor.version());
             config.build.install_command = Some(if mode == "empty" {
                 String::new()
             } else {
@@ -101,7 +101,7 @@ async fn authored_python_install_preserves_pure_prebuilt_and_static_stage_bounda
                 config.deploy.compute = Some("static".into());
             } else {
                 config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
-                config.deploy.python_version = Some(minor);
+                config.deploy.python_version = Some(minor.version());
                 config.deploy.entry = Some("main.py".into());
             }
             if matches!(mode, "skip-install" | "skip-build" | "empty") {
@@ -226,22 +226,13 @@ async fn authored_install_qualifies_python_sibling_dependencies_under_node_prima
             project.path().join("installer-marker").exists(),
             "custom install was not executed"
         );
-        if compiler == nrz_source_bundle::BuildToolchainFamily::Python {
-            assert!(error.to_string().contains("native payload"), "{error:#}");
-        } else {
-            assert!(
-                error
-                    .to_string()
-                    .contains("matching build and serving Python minors"),
-                "{error:#}"
-            );
-        }
+        assert!(error.to_string().contains("native payload"), "{error:#}");
     }
 }
 
 #[test]
 fn authored_python_dependency_guard_preserves_frozen_owners_and_builder_mode() {
-    use crate::artifact::{ArtifactRootScope, RuntimeArtifact, RuntimeArtifactScan};
+    use crate::artifact::{RuntimeArtifact, RuntimeArtifactScan};
     for minor in PythonMinor::ALL {
         let project = tempfile::tempdir().unwrap();
         std::fs::write(project.path().join("worker.py"), "print('WORKER')\n").unwrap();
@@ -257,17 +248,9 @@ fn authored_python_dependency_guard_preserves_frozen_owners_and_builder_mode() {
         let artifact = RuntimeArtifact {
             root_dir: project.path().into(),
             manifest,
-            scan: RuntimeArtifactScan::PythonRuntimeRoot(minor),
+            scan: RuntimeArtifactScan::PythonRuntimeRoot(Some(minor)),
         };
-        let scanned =
-            super::super::scan::scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
-        let files = crate::artifact::classify_artifact_files(
-            &artifact.manifest,
-            scanned,
-            &crate::detect::detect(project.path()),
-            ArtifactRootScope::ProjectRoot,
-            &artifact.scan,
-        );
+        let files = super::output_tests::classify_python_artifact(&artifact);
         assert!(validate_retained_python_native_platform(&artifact, &files).is_err());
         assert!(
             validate_authored_python_dependency_output(
@@ -317,14 +300,14 @@ async fn retained_python_native_platform_is_checked_without_install_or_build() {
                 std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
                 let mut config = nrz::config::ProjectConfig::default();
                 config.build.output_directory = Some(".".into());
-                config.build.python_version = Some(minor);
+                config.build.python_version = Some(minor.version());
                 config.build.install_command = Some(if invocation == "empty-install" {
                     String::new()
                 } else {
                     "printf UNEXPECTED_INSTALL > installer-marker".into()
                 });
                 config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
-                config.deploy.python_version = Some(minor);
+                config.deploy.python_version = Some(minor.version());
                 config.deploy.entry = Some("main.py".into());
                 crate::deploy::test_support::write_project_config(project.path(), &config);
                 let (command, mut args) =

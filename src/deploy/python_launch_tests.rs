@@ -13,6 +13,30 @@ fn resolve_launch(
     resolve_launch_for_framework(fs, request, None)
 }
 
+fn run_default_python_launch(
+    project: &std::path::Path,
+    launch: &PythonLaunch,
+) -> std::process::Output {
+    let entry = materialize_python_entry(
+        project,
+        launch,
+        Some(nrz_source_bundle::PythonMinor::default()),
+    )
+    .unwrap();
+    let result = Command::new("python3")
+        .arg(project.join(entry))
+        .args(&launch.args)
+        .current_dir(project)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    result
+}
+
 #[test]
 fn python_module_bootstrap_preserves_literal_arguments_and_src_imports() {
     let project = tempfile::tempdir().unwrap();
@@ -40,23 +64,7 @@ fn python_module_bootstrap_preserves_literal_arguments_and_src_imports() {
     )
     .unwrap()
     .unwrap();
-    let entry = materialize_python_entry(
-        project.path(),
-        &launch,
-        nrz_source_bundle::PythonMinor::default(),
-    )
-    .unwrap();
-    let result = Command::new("python3")
-        .arg(project.path().join(&entry))
-        .args(&launch.args)
-        .current_dir(project.path())
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    let result = run_default_python_launch(project.path(), &launch);
     let observed: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(observed["args"], serde_json::json!(arguments));
     assert_eq!(observed["name"], "__main__");
@@ -83,7 +91,7 @@ fn python_bootstrap_bytes_are_independent_of_frozen_launch_intent() {
         let entry = materialize_python_entry(
             project.path(),
             &launch,
-            nrz_source_bundle::PythonMinor::default(),
+            Some(nrz_source_bundle::PythonMinor::default()),
         )
         .unwrap();
         let bootstrap = std::fs::read(project.path().join(entry)).unwrap();
@@ -123,23 +131,7 @@ fn python_module_bootstrap_prefers_installed_application_package_over_source_lay
     )
     .unwrap()
     .unwrap();
-    let entry = materialize_python_entry(
-        project.path(),
-        &launch,
-        nrz_source_bundle::PythonMinor::default(),
-    )
-    .unwrap();
-    let result = Command::new("python3")
-        .arg(project.path().join(&entry))
-        .args(&launch.args)
-        .current_dir(project.path())
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    let result = run_default_python_launch(project.path(), &launch);
     assert_eq!(String::from_utf8(result.stdout).unwrap(), "installed\n");
 }
 
@@ -189,7 +181,7 @@ fn python_server_missing_production_dependency_has_actionable_error() {
     let error = materialize_python_entry(
         project.path(),
         &launch,
-        nrz_source_bundle::PythonMinor::default(),
+        Some(nrz_source_bundle::PythonMinor::default()),
     )
     .unwrap_err();
     assert!(
@@ -198,6 +190,27 @@ fn python_server_missing_production_dependency_has_actionable_error() {
             .contains("uvicorn in installed production dependencies")
     );
     assert!(error.to_string().contains("poetry add uvicorn"));
+    let stale = project
+        .path()
+        .join(".onreza/python/3.11/site-packages/uvicorn");
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join("__main__.py"), "").unwrap();
+    for actual in [None, Some(nrz_source_bundle::PythonMinor::Python314)] {
+        assert!(
+            super::python_launch::validate_python_server_dependencies(
+                project.path(),
+                &launch.args,
+                actual
+            )
+            .is_err()
+        );
+    }
+    super::python_launch::validate_python_server_dependencies(
+        project.path(),
+        &launch.args,
+        nrz_source_bundle::PythonMinor::from_version("3.11"),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -333,23 +346,7 @@ fn python_declared_console_script_freezes_callable_and_runs_literal_arguments() 
         .unwrap()
         .unwrap();
         assert_eq!(launch.args[..2], ["CALLABLE", "demo:main"]);
-        let entry = materialize_python_entry(
-            project.path(),
-            &launch,
-            nrz_source_bundle::PythonMinor::default(),
-        )
-        .unwrap();
-        let result = Command::new("python3")
-            .arg(project.path().join(&entry))
-            .args(&launch.args)
-            .current_dir(project.path())
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+        let result = run_default_python_launch(project.path(), &launch);
         assert_eq!(
             serde_json::from_slice::<Vec<String>>(&result.stdout).unwrap(),
             args
@@ -497,7 +494,17 @@ async fn python_framework_server_http_port_and_graceful_shutdown_qualification()
             } else {
                 std::fs::write(project.path().join("main.py"), source).unwrap();
             }
-            for command in install_commands(project.path(), mode, "linux", "x86_64", minor).unwrap()
+            for command in install_commands(
+                project.path(),
+                mode,
+                "linux",
+                "x86_64",
+                minor,
+                Some(&super::python_toolchain_tests::qualification_interpreter(
+                    &uv, minor,
+                )),
+            )
+            .unwrap()
             {
                 let program = if command.program.as_os_str().is_empty() {
                     uv.as_path()
@@ -527,10 +534,8 @@ async fn python_framework_server_http_port_and_graceful_shutdown_qualification()
             )
             .unwrap()
             .unwrap();
-            let entry = materialize_python_entry(project.path(), &launch, minor).unwrap();
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let port = listener.local_addr().unwrap().port();
-            drop(listener);
+            let entry = materialize_python_entry(project.path(), &launch, Some(minor)).unwrap();
+            let port = available_http_port();
             let log = tempfile::NamedTempFile::new().unwrap();
             let child = Command::new(&interpreter)
                 .arg(project.path().join(&entry))
@@ -607,6 +612,12 @@ async fn python_framework_server_http_port_and_graceful_shutdown_qualification()
 }
 
 #[cfg(unix)]
+fn available_http_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().port()
+}
+
+#[cfg(unix)]
 struct PythonServer(std::process::Child);
 
 #[cfg(unix)]
@@ -658,7 +669,7 @@ fn python_bootstrap_rejects_symlinked_generated_layout() {
     let error = materialize_python_entry(
         project.path(),
         &launch,
-        nrz_source_bundle::PythonMinor::default(),
+        Some(nrz_source_bundle::PythonMinor::default()),
     )
     .unwrap_err();
     assert!(error.to_string().contains("must not contain symlinks"));
@@ -684,7 +695,7 @@ fn python_bootstrap_preserves_the_selected_build_minor_on_another_interpreter() 
             entry: crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY.into(),
             args: vec!["MODULE".into(), "demo".into()],
         };
-        let entry = materialize_python_entry(project.path(), &launch, minor).unwrap();
+        let entry = materialize_python_entry(project.path(), &launch, Some(minor)).unwrap();
         let output = Command::new("python3")
             .args(["-I", &entry])
             .args(&launch.args)
@@ -787,7 +798,7 @@ fn assert_python_pth_launch(mode: &str) {
         )
         .unwrap()
         .unwrap();
-        let entry = materialize_python_entry(project.path(), &launch, minor).unwrap();
+        let entry = materialize_python_entry(project.path(), &launch, Some(minor)).unwrap();
         let result = Command::new("python3")
             .args(["-I", &entry])
             .args(&launch.args)
@@ -855,13 +866,13 @@ fn python_script_wrapper_and_bootstrap_share_pth_initialization_once() {
             )
             .unwrap()
             .unwrap();
-            let entry = materialize_python_entry(project.path(), &launch, minor).unwrap();
+            let entry = materialize_python_entry(project.path(), &launch, Some(minor)).unwrap();
             // A relative alias reaches the same canonical stage as the inner
             // bootstrap, whose initializer definition executes a second time.
             let stage = format!("./{}", minor.site_packages_root());
             let wrapper = nrz_runtime_artifact::python_script_launch_arguments(
                 &entry,
-                &stage,
+                Some(&stage),
                 project.path().to_str().unwrap(),
             );
             let result = Command::new("python3")
@@ -914,7 +925,7 @@ fn python_site_initialization_promotes_preexisting_wheel_pth_directory() {
         .join("vendor/nested");
     let mut wrapper = nrz_runtime_artifact::python_script_launch_arguments(
         "probe.py",
-        minor.site_packages_root(),
+        Some(&minor.site_packages_root()),
         project.path().to_str().unwrap(),
     );
     let code = wrapper
@@ -979,7 +990,7 @@ fn python_script_wrapper_preserves_script_directory_fallback_priority() {
     .unwrap()
     .unwrap();
     let minor = nrz_source_bundle::PythonMinor::Python314;
-    let entry = materialize_python_entry(project.path(), &launch, minor).unwrap();
+    let entry = materialize_python_entry(project.path(), &launch, Some(minor)).unwrap();
     let direct = Command::new("python3")
         .arg(&entry)
         .args(&launch.args)
@@ -991,7 +1002,7 @@ fn python_script_wrapper_preserves_script_directory_fallback_priority() {
     assert_eq!(direct["origin"], "SCRIPT_DIRECTORY");
     let wrapper = nrz_runtime_artifact::python_script_launch_arguments(
         &entry,
-        minor.site_packages_root(),
+        Some(&minor.site_packages_root()),
         project.path().to_str().unwrap(),
     );
     for expected in ["SCRIPT_DIRECTORY", "INSTALLED_WHEEL"] {
@@ -1068,10 +1079,8 @@ async fn python_servers_process_real_wheel_pth_before_source_fallback() {
             )
             .unwrap()
             .unwrap();
-            let entry = materialize_python_entry(project.path(), &launch, minor).unwrap();
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let port = listener.local_addr().unwrap().port();
-            drop(listener);
+            let entry = materialize_python_entry(project.path(), &launch, Some(minor)).unwrap();
+            let port = available_http_port();
             let log = tempfile::NamedTempFile::new().unwrap();
             let mut child = PythonServer(
                 Command::new(&interpreter)
@@ -1129,4 +1138,53 @@ async fn python_servers_process_real_wheel_pth_before_source_fallback() {
         assert_eq!(observed["initializedOrigin"], "INSTALLED_WHEEL");
         assert_eq!(observed["initialized"], 1);
     }
+}
+
+#[test]
+fn generic_python_bootstrap_uses_outer_owned_roots_without_inventing_a_minor() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join("src/demo")).unwrap();
+    std::fs::write(project.path().join("src/demo/__init__.py"), "").unwrap();
+    let module = project.path().join("src/demo/__main__.py");
+    std::fs::write(&module, "import sys; print(sys.argv[1])\n").unwrap();
+    let launch = crate::detect::python_launch::PythonLaunch {
+        entry: crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY.into(),
+        args: vec!["MODULE".into(), "demo".into(), "literal argument".into()],
+    };
+    let entry = materialize_python_entry(project.path(), &launch, None).unwrap();
+    let execute = |dependency_root| {
+        let arguments =
+            nrz_runtime_artifact::python_script_launch_arguments(&entry, dependency_root, ".");
+        std::process::Command::new("python3")
+            .args(arguments)
+            .args(&launch.args)
+            .current_dir(project.path())
+            .output()
+            .unwrap()
+    };
+    let output = execute(None);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "literal argument"
+    );
+    let root = ".onreza/python/3.11/site-packages";
+    std::fs::create_dir_all(project.path().join(root)).unwrap();
+    std::fs::write(
+        project.path().join(root).join("owned.py"),
+        "VALUE = 'owned 3.11'\n",
+    )
+    .unwrap();
+    std::fs::write(&module, "import owned; print(owned.VALUE)\n").unwrap();
+    let output = execute(Some(root));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "owned 3.11");
 }

@@ -301,7 +301,11 @@ fn standalone_build_static_separates_build_toolchain_from_process_launch() {
 #[test]
 fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
     let config = tempfile::tempdir().unwrap();
-    for minor in nrz_source_bundle::PythonMinor::ALL {
+    for version in nrz_source_bundle::PythonMinor::ALL
+        .into_iter()
+        .map(|minor| minor.version())
+        .chain(["2.7", "3.11", "3.14.9", "4.x"].map(str::to_string))
+    {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
             temp.path().join("package.json"),
@@ -310,7 +314,7 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
         .unwrap();
         let configuration = format!(
             "[project]\nframework='python'\n[build]\noutput_dirs=['.']\n[deploy]\nruntime='python'\npython_version='{}'\n",
-            minor.version()
+            version
         );
         fs::write(temp.path().join("onreza.toml"), &configuration).unwrap();
         let app = temp.path().join("apps/api");
@@ -346,7 +350,7 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
         let explained = stdout_json(&explained);
         assert_eq!(
             explained["effective"]["deployPythonVersion"]["value"],
-            minor.version()
+            version
         );
         let plan = plan_command
             .current_dir(&temp)
@@ -370,11 +374,8 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
             String::from_utf8_lossy(&plan.stderr)
         );
         let plan = stdout_json(&plan);
-        assert_eq!(plan["framework"]["runtimeVersion"], minor.version());
-        assert_eq!(
-            plan["framework"]["pythonPatchVersion"],
-            minor.exact_version()
-        );
+        assert_eq!(plan["framework"]["runtimeVersion"], version);
+        assert!(plan["framework"]["pythonPatchVersion"].is_null());
         // Local detection reads the selected project's declaration directly.
         fs::write(app.join("onreza.toml"), &configuration).unwrap();
         let detected = detect_command
@@ -384,10 +385,10 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
             .unwrap();
         assert!(detected.status.success());
         let detected = stdout_json(&detected);
-        assert_eq!(detected["metadata"]["runtime"]["version"], minor.version());
+        assert_eq!(detected["metadata"]["runtime"]["version"], version);
         assert_eq!(
             detected["metadata"]["sourceBuildContext"]["applicationRuntime"]["pythonVersion"],
-            minor.version()
+            version
         );
     }
 }

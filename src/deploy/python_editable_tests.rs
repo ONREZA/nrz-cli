@@ -96,6 +96,7 @@ async fn python_local_editables_cannot_bypass_target_wheel_policy() {
             "linux",
             "x86_64",
             minor,
+            Some(std::path::Path::new(python.trim())),
         )
         .unwrap();
         assert_eq!(commands.len(), 1);
@@ -159,6 +160,7 @@ with zipfile.ZipFile(sys.argv[1], 'w') as z:
             "linux",
             "x86_64",
             minor,
+            Some(std::path::Path::new(python.trim())),
         )
         .unwrap()
         .remove(0);

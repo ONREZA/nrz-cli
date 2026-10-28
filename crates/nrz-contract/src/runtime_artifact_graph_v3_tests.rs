@@ -69,7 +69,7 @@ fn graph_wire_requires_closed_discriminators_and_compute_launch() {
             json!("APPLICATION_MEMBERSHIP_V2.0"),
         ),
         ("/layers/0/target", json!("MIDDLEWARE")),
-        ("/layers/1/launch/profile", json!("NODE_28")),
+        ("/layers/1/launch/profile", json!("NODE_028")),
     ] {
         let mut value = graph();
         *value.pointer_mut(pointer).unwrap() = supplied;

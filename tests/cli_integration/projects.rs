@@ -285,7 +285,7 @@ fn info_preserves_the_cli_projection_of_project_details() {
         auto_deploy_enabled: Some(false),
         branch: Some("main".into()),
         root_directory: Some("apps/web".into()),
-        node_version: Some(nrz_api::Project200Response3NodeVersion::Node24),
+        node_version: Some("NODE_24".into()),
         package_manager: Some(nrz_api::ProjectRequestBodyPackageManager::Bun),
         created_at: TIMESTAMP.parse().unwrap(),
         updated_at: TIMESTAMP.parse().unwrap(),

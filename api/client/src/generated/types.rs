@@ -62,6 +62,8 @@ static REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_ACTIVATE_RELEASE_REQUEST_HEADER_I
 });
 static REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[1-9][0-9]*$").expect("invalid regex"));
+static REGEX_PROJECT_REQUEST_BODY2_NODE_VERSION: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new("^[^\\u0000]*$").expect("invalid regex"));
 static REGEX_PROJECT_REQUEST_BODY_BRANCH: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[a-zA-Z0-9_\\-/.]+$").expect("invalid regex"));
 static REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME: std::sync::LazyLock<
@@ -73,17 +75,19 @@ static REGEX_REMOTE_IMAGE_SOURCE_AUTHORING_ID: std::sync::LazyLock<regex::Regex>
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$").expect("invalid regex")
     });
-static REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY: std::sync::LazyLock<
-    regex::Regex,
-> = std::sync::LazyLock::new(|| {
-    regex::Regex::new("^[^\\u0000]*$").expect("invalid regex")
-});
 static REGEX_SOURCE_PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new("\\.nrz-fn\\.(?:ts|tsx|js|jsx|mjs)$").expect("invalid regex")
 });
 static REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_APPLICATION_BLOB_DESCRIPTOR_DIGEST:
     std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^sha256:[0-9a-f]{64}$").expect("invalid regex"));
+static REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_RUNTIME_LAYER_LAUNCH_PROFILE:
+    std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(
+            "^(?:BUN|EXECUTABLE|NODE|CPYTHON|NODE_(?:0|[1-9][0-9]{0,8})|CPYTHON_(?:0|[1-9][0-9]{0,8})_(?:0|[1-9][0-9]{0,8}))$",
+        )
+        .expect("invalid regex")
+});
 static REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_RUNTIME_LAYER_RUNTIME_CONFIG_RUNTIME_POLICY_LINEAGE: std::sync::LazyLock<
     regex::Regex,
 > = std::sync::LazyLock::new(|| {
@@ -5880,7 +5884,11 @@ pub struct ProjectRequestBody2 {
     #[validate(length(max = 1_000u64))]
     pub ignored_build_command: Option<String>,
     #[serde(rename = "nodeVersion")]
-    pub node_version: Option<Project200Response3NodeVersion>,
+    #[validate(
+        length(min = 1u64, max = 128u64),
+        regex(path = "REGEX_PROJECT_REQUEST_BODY2_NODE_VERSION")
+    )]
+    pub node_version: Option<String>,
     #[serde(rename = "exposeSystemEnvVars")]
     pub expose_system_env_vars: Option<ProjectRequestBody2IncludeFilesOutsideRoot>,
     #[serde(rename = "concurrentBuildsEnabled")]
@@ -18331,25 +18339,6 @@ pub struct Project200Response3Application {
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum Project200Response3NodeVersion {
-    #[serde(rename = "NODE_22")]
-    #[default]
-    Node22,
-    #[serde(rename = "NODE_24")]
-    Node24,
-    #[serde(rename = "NODE_26")]
-    Node26,
-}
-impl core::fmt::Display for Project200Response3NodeVersion {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Node22 => write!(f, "NODE_22"),
-            Self::Node24 => write!(f, "NODE_24"),
-            Self::Node26 => write!(f, "NODE_26"),
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Project200Response3IgnoredBuildBehavior {
     #[serde(rename = "AUTOMATIC")]
     #[default]
@@ -18598,7 +18587,7 @@ pub struct Project200Response3 {
     pub include_files_outside_root: Option<bool>,
     #[serde(deserialize_with = "Option::deserialize", rename = "nodeVersion")]
     #[serialize_always]
-    pub node_version: Option<Project200Response3NodeVersion>,
+    pub node_version: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "packageManager")]
     #[serialize_always]
     pub package_manager: Option<ProjectRequestBodyPackageManager>,
@@ -19981,7 +19970,7 @@ pub struct Deployment200ResponseProject {
     pub detected_framework: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "nodeVersion")]
     #[serialize_always]
-    pub node_version: Option<Project200Response3NodeVersion>,
+    pub node_version: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "installCommand")]
     #[serialize_always]
     pub install_command: Option<String>,
@@ -23334,40 +23323,6 @@ pub struct Status200ResponseRuntimeArtifactGraphRuntimeLayerDependencyBindings {
     pub mounts: Vec<Status200ResponseRuntimeArtifactGraphRuntimeLayerDependencyBindingsMount>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum Status200ResponseRuntimeArtifactGraphRuntimeLayerLaunchProfile {
-    #[serde(rename = "BUN")]
-    #[default]
-    Bun,
-    #[serde(rename = "NODE_22")]
-    Node22,
-    #[serde(rename = "NODE_24")]
-    Node24,
-    #[serde(rename = "NODE_26")]
-    Node26,
-    #[serde(rename = "CPYTHON_3_12")]
-    Cpython312,
-    #[serde(rename = "CPYTHON_3_13")]
-    Cpython313,
-    #[serde(rename = "CPYTHON_3_14")]
-    Cpython314,
-    #[serde(rename = "EXECUTABLE")]
-    Executable,
-}
-impl core::fmt::Display for Status200ResponseRuntimeArtifactGraphRuntimeLayerLaunchProfile {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Bun => write!(f, "BUN"),
-            Self::Node22 => write!(f, "NODE_22"),
-            Self::Node24 => write!(f, "NODE_24"),
-            Self::Node26 => write!(f, "NODE_26"),
-            Self::Cpython312 => write!(f, "CPYTHON_3_12"),
-            Self::Cpython313 => write!(f, "CPYTHON_3_13"),
-            Self::Cpython314 => write!(f, "CPYTHON_3_14"),
-            Self::Executable => write!(f, "EXECUTABLE"),
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Status200ResponseRuntimeArtifactGraphRuntimeLayerLaunchReadinessProtocol {
     #[serde(rename = "TCP")]
     #[default]
@@ -23401,7 +23356,10 @@ pub struct Status200ResponseRuntimeArtifactGraphRuntimeLayerLaunchReadiness {
 )]
 #[serde(deny_unknown_fields)]
 pub struct Status200ResponseRuntimeArtifactGraphRuntimeLayerLaunch {
-    pub profile: Status200ResponseRuntimeArtifactGraphRuntimeLayerLaunchProfile,
+    #[validate(regex(
+        path = "REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_RUNTIME_LAYER_LAUNCH_PROFILE"
+    ))]
+    pub profile: String,
     #[validate(length(max = 64u64))]
     pub args: Vec<String>,
     #[validate(length(min = 1u64, max = 512u64))]
@@ -24528,28 +24486,9 @@ impl RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily2 {
         serde::Serialize::serialize(value, serializer)
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion {
-    #[serde(rename = "3.12")]
-    #[default]
-    T312,
-    #[serde(rename = "3.13")]
-    T313,
-    #[serde(rename = "3.14")]
-    T314,
-}
-impl core::fmt::Display
-    for RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion
-{
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::T312 => write!(f, "3.12"),
-            Self::T313 => write!(f, "3.13"),
-            Self::T314 => write!(f, "3.14"),
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 #[serde(deny_unknown_fields)]
 pub struct RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObject {
     #[serde(
@@ -24561,8 +24500,11 @@ pub struct RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjec
     #[default("PYTHON".to_string())]
     pub family: String,
     #[serde(rename = "pythonVersion")]
-    pub python_version:
-        RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion,
+    #[validate(
+        length(min = 1u64, max = 128u64),
+        regex(path = "REGEX_PROJECT_REQUEST_BODY2_NODE_VERSION")
+    )]
+    pub python_version: String,
 }
 impl RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObject {
     #[allow(
@@ -24684,9 +24626,7 @@ impl RunnerContext200ResponseSettingsSourceBuildContextBuildToolchain {
             },
         )
     }
-    pub fn object(
-        python_version: RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion,
-    ) -> Self {
+    pub fn object(python_version: String) -> Self {
         Self::Object(
             RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObject {
                 python_version,
@@ -24723,9 +24663,7 @@ pub struct RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeO
     pub python_version: Option<serde_json::Value>,
     #[validate(
         length(min = 1u64, max = 4_096u64),
-        regex(
-            path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY"
-        )
+        regex(path = "REGEX_PROJECT_REQUEST_BODY2_NODE_VERSION")
     )]
     pub entry: Option<String>,
 }
@@ -24790,9 +24728,7 @@ pub struct RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeO
     pub python_version: Option<serde_json::Value>,
     #[validate(
         length(min = 1u64, max = 4_096u64),
-        regex(
-            path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY"
-        )
+        regex(path = "REGEX_PROJECT_REQUEST_BODY2_NODE_VERSION")
     )]
     pub entry: Option<String>,
 }
@@ -24857,9 +24793,7 @@ pub struct RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeO
     pub python_version: Option<serde_json::Value>,
     #[validate(
         length(min = 1u64, max = 4_096u64),
-        regex(
-            path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY"
-        )
+        regex(path = "REGEX_PROJECT_REQUEST_BODY2_NODE_VERSION")
     )]
     pub entry: Option<String>,
 }
@@ -24921,13 +24855,14 @@ pub struct RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeO
     #[validate(length(max = 64u64))]
     pub args: Vec<String>,
     #[serde(rename = "pythonVersion")]
-    pub python_version:
-        RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion,
+    #[validate(
+        length(min = 1u64, max = 128u64),
+        regex(path = "REGEX_PROJECT_REQUEST_BODY2_NODE_VERSION")
+    )]
+    pub python_version: String,
     #[validate(
         length(min = 1u64, max = 4_096u64),
-        regex(
-            path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY"
-        )
+        regex(path = "REGEX_PROJECT_REQUEST_BODY2_NODE_VERSION")
     )]
     pub entry: Option<String>,
 }
@@ -25085,7 +25020,11 @@ pub struct RunnerContext200ResponseSettings {
     #[serde(rename = "packageManager")]
     pub package_manager: ProjectRequestBodyPackageManager,
     #[serde(rename = "nodeVersion")]
-    pub node_version: Project200Response3NodeVersion,
+    #[validate(
+        length(min = 1u64, max = 128u64),
+        regex(path = "REGEX_PROJECT_REQUEST_BODY2_NODE_VERSION")
+    )]
+    pub node_version: String,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "sourceBuildContext"

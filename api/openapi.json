@@ -4240,12 +4240,10 @@
                     "nodeVersion": {
                       "anyOf": [
                         {
-                          "enum": [
-                            "NODE_22",
-                            "NODE_24",
-                            "NODE_26"
-                          ],
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[^\\u0000]*$"
                         },
                         {
                           "type": "null"
@@ -5168,12 +5166,10 @@
                     "maxLength": 1000
                   },
                   "nodeVersion": {
-                    "enum": [
-                      "NODE_22",
-                      "NODE_24",
-                      "NODE_26"
-                    ],
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[^\\u0000]*$"
                   },
                   "exposeSystemEnvVars": {
                     "anyOf": [
@@ -9196,12 +9192,10 @@
                         "nodeVersion": {
                           "anyOf": [
                             {
-                              "enum": [
-                                "NODE_22",
-                                "NODE_24",
-                                "NODE_26"
-                              ],
-                              "type": "string"
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[^\\u0000]*$"
                             },
                             {
                               "type": "null"
@@ -21531,17 +21525,8 @@
                                     "type": "object",
                                     "properties": {
                                       "profile": {
-                                        "enum": [
-                                          "BUN",
-                                          "NODE_22",
-                                          "NODE_24",
-                                          "NODE_26",
-                                          "CPYTHON_3_12",
-                                          "CPYTHON_3_13",
-                                          "CPYTHON_3_14",
-                                          "EXECUTABLE"
-                                        ],
-                                        "type": "string"
+                                        "type": "string",
+                                        "pattern": "^(?:BUN|EXECUTABLE|NODE|CPYTHON|NODE_(?:0|[1-9][0-9]{0,8})|CPYTHON_(?:0|[1-9][0-9]{0,8})_(?:0|[1-9][0-9]{0,8}))$"
                                       },
                                       "args": {
                                         "type": "array",
@@ -24705,12 +24690,10 @@
                           "type": "string"
                         },
                         "nodeVersion": {
-                          "enum": [
-                            "NODE_22",
-                            "NODE_24",
-                            "NODE_26"
-                          ],
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[^\\u0000]*$"
                         },
                         "sourceBuildContext": {
                           "anyOf": [
@@ -24757,12 +24740,10 @@
                                           "type": "string"
                                         },
                                         "pythonVersion": {
-                                          "enum": [
-                                            "3.12",
-                                            "3.13",
-                                            "3.14"
-                                          ],
-                                          "type": "string"
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[^\\u0000]*$"
                                         }
                                       },
                                       "required": [
@@ -24903,12 +24884,10 @@
                                               "maxItems": 64
                                             },
                                             "pythonVersion": {
-                                              "enum": [
-                                                "3.12",
-                                                "3.13",
-                                                "3.14"
-                                              ],
-                                              "type": "string"
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 128,
+                                              "pattern": "^[^\\u0000]*$"
                                             },
                                             "entry": {
                                               "type": "string",

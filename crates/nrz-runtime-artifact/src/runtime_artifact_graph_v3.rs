@@ -272,12 +272,8 @@ fn validate(
         // Reuse the source launch/target and network domains without an inventory clone.
         let family = match launch.profile {
             crate::RuntimeProfile::Bun => "BUN",
-            crate::RuntimeProfile::Node22
-            | crate::RuntimeProfile::Node24
-            | crate::RuntimeProfile::Node26 => "NODE",
-            crate::RuntimeProfile::Cpython312
-            | crate::RuntimeProfile::Cpython313
-            | crate::RuntimeProfile::Cpython314 => "PYTHON",
+            crate::RuntimeProfile::NodeAny | crate::RuntimeProfile::Node(_) => "NODE",
+            crate::RuntimeProfile::CpythonAny | crate::RuntimeProfile::Cpython(_, _) => "PYTHON",
             crate::RuntimeProfile::Executable => "EXECUTABLE",
         };
         let config = json!({"applicationRuntime": {"family": family, "args": launch.args}, "network": network});

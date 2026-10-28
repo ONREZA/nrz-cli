@@ -451,25 +451,28 @@ fn verify_dependency_build_profile(
     dependency: &RuntimeDependencyWire,
     profile: RuntimeProfile,
 ) -> Result<(), RuntimeArtifactError> {
-    let expected = match profile {
-        RuntimeProfile::Node22 => Some("node-22"),
-        RuntimeProfile::Node24 => Some("node-24"),
-        RuntimeProfile::Node26 => Some("node-26"),
-        _ => None,
+    let target = dependency.compatibility.runtime_version.as_str();
+    let valid = match profile {
+        RuntimeProfile::NodeAny | RuntimeProfile::Node(_) => {
+            dependency.compatibility.runtime_family.as_str() == "javascript"
+                && RuntimeProfile::node_build_target(target).is_some_and(|build| {
+                    matches!(build, RuntimeProfile::Node(_))
+                        && (profile == RuntimeProfile::NodeAny || build == profile)
+                })
+                && dependency.kind.to_string() == "JAVASCRIPT_NODE_MODULES"
+        }
+        RuntimeProfile::CpythonAny | RuntimeProfile::Cpython(_, _) => {
+            dependency.compatibility.runtime_family.as_str() == "python"
+                && RuntimeProfile::python_build_target(target).is_some_and(|build| {
+                    matches!(build, RuntimeProfile::Cpython(_, _))
+                        && (profile == RuntimeProfile::CpythonAny || build == profile)
+                })
+                && dependency.kind.to_string() == "PYTHON_SITE_PACKAGES"
+        }
+        _ => true,
     };
-    if let Some(minor) = python_minor_for_profile(profile)
-        && (dependency.compatibility.runtime_family.as_str() != "python"
-            || dependency.compatibility.runtime_version.as_str() != minor.target()
-            || dependency.kind.to_string() != "PYTHON_SITE_PACKAGES")
-    {
-        return invariant("Python launch profile conflicts with dependency build minor");
-    }
-    if expected.is_some_and(|version| {
-        dependency.compatibility.runtime_family.as_str() != "javascript"
-            || dependency.compatibility.runtime_version.as_str() != version
-            || dependency.kind.to_string() != "JAVASCRIPT_NODE_MODULES"
-    }) {
-        return invariant("Node launch profile conflicts with dependency runtime target");
+    if !valid {
+        return invariant("launch profile conflicts with dependency build target");
     }
     Ok(())
 }

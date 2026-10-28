@@ -79,7 +79,7 @@ fn explained_serving_python_minor_matches_deployment_selection() {
                 let mut config = ProjectConfig::default();
                 config.build.toolchain = family;
                 config.build.python_version =
-                    (family == Some(BuildToolchainFamily::Python)).then_some(minor);
+                    (family == Some(BuildToolchainFamily::Python)).then(|| minor.version());
                 config.deploy.runtime =
                     explicit_serving.then_some(ApplicationRuntimeFamily::Python);
                 let mut detection = crate::detect::detect(dir.path());
@@ -97,7 +97,7 @@ fn explained_serving_python_minor_matches_deployment_selection() {
                 .unwrap();
                 assert_eq!(
                     explanation.deploy_python_version.value.as_deref(),
-                    expected.map(PythonMinor::version)
+                    expected.as_deref()
                 );
                 assert_eq!(
                     explanation.deploy_python_version.source,
@@ -107,14 +107,14 @@ fn explained_serving_python_minor_matches_deployment_selection() {
                         "default"
                     }
                 );
-                config.deploy.python_version = Some(minor);
+                config.deploy.python_version = Some(minor.version());
                 let explanation =
                     EffectiveProjectConfig::from_project_config(dir.path().to_owned(), config)
                         .explain()
                         .unwrap();
                 assert_eq!(
                     explanation.deploy_python_version.value.as_deref(),
-                    Some(minor.version())
+                    Some(minor.version().as_str())
                 );
                 assert_eq!(explanation.deploy_python_version.source, "onreza.toml");
             }
@@ -162,7 +162,7 @@ fn explained_python_toolchain_matches_the_shared_build_selection() {
     for minor in nrz_source_bundle::PythonMinor::ALL {
         for explicit in [false, true] {
             let mut config = ProjectConfig::default();
-            config.build.python_version = Some(minor);
+            config.build.python_version = Some(minor.version());
             config.build.toolchain =
                 explicit.then_some(nrz_source_bundle::BuildToolchainFamily::Python);
             let selected =
@@ -175,7 +175,7 @@ fn explained_python_toolchain_matches_the_shared_build_selection() {
             assert_eq!(explained.build_toolchain.source, "onreza.toml");
             assert_eq!(
                 explained.build_python_version.value.as_deref(),
-                Some(minor.version())
+                Some(minor.version().as_str())
             );
             assert_eq!(explained.build_python_version.source, "onreza.toml");
             assert_eq!(
@@ -196,7 +196,7 @@ fn explained_python_toolchain_matches_the_shared_build_selection() {
         for minor in nrz_source_bundle::PythonMinor::ALL {
             let mut config = ProjectConfig::default();
             config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
-            config.deploy.python_version = Some(minor);
+            config.deploy.python_version = Some(minor.version());
             config.build.toolchain = build_family;
             let selected =
                 crate::detect::application_runtime::resolve_build_toolchain(&detection, &config)
@@ -209,7 +209,8 @@ fn explained_python_toolchain_matches_the_shared_build_selection() {
                 explained.build_python_version.value.as_deref(),
                 selected
                     .resolved_python_minor()
-                    .map(nrz_source_bundle::PythonMinor::version),
+                    .map(nrz_source_bundle::PythonMinor::version)
+                    .as_deref(),
                 "{build_family:?} / {minor:?}"
             );
             assert_eq!(
@@ -236,6 +237,7 @@ fn explained_python_toolchain_matches_the_shared_build_selection() {
         selected
             .resolved_python_minor()
             .map(nrz_source_bundle::PythonMinor::version)
+            .as_deref()
     );
     assert_eq!(explained.build_python_version.source, "default");
     let empty = EffectiveProjectConfig::from_project_config(

@@ -2,7 +2,7 @@ use super::*;
 use nrz_source_bundle::{ApplicationRuntimeFamily, BuildToolchainFamily, PythonMinor};
 
 #[tokio::test]
-async fn code_only_python_plan_ignores_stale_unselected_minors_and_rejects_selected_dependencies() {
+async fn python_plan_retains_owned_dependencies_and_ignores_stale_unselected_minors() {
     for compiler in [
         BuildToolchainFamily::Node,
         BuildToolchainFamily::Bun,
@@ -28,9 +28,29 @@ async fn code_only_python_plan_ignores_stale_unselected_minors_and_rejects_selec
             config.build.toolchain = Some(compiler);
             config.build.output_directory = Some(".".into());
             config.deploy.runtime = Some(ApplicationRuntimeFamily::Python);
-            config.deploy.python_version = Some(selected);
+            config.deploy.python_version = Some("4.x".into());
             config.deploy.entry = Some("main.py".into());
             crate::deploy::test_support::write_project_config(project.path(), &config);
+            let mut manifest = crate::build::manifest::generate_compute_manifest("main.py");
+            let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+                family: ApplicationRuntimeFamily::Python,
+                python_version: Some("4.x".into()),
+                entry: Some("main.py".into()),
+                args: vec![],
+            };
+            super::super::apply_application_runtime_manifest(
+                &mut manifest,
+                Some(&declaration),
+                Some(&selected.target()),
+                "python",
+            )
+            .unwrap();
+            std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
+            std::fs::write(
+                project.path().join(".onreza/manifest.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
             let (command, args) = crate::deploy::test_support::deploy_context(
                 project.path(),
                 &config,
@@ -72,15 +92,21 @@ async fn code_only_python_plan_ignores_stale_unselected_minors_and_rejects_selec
                 .join("active");
             std::fs::create_dir_all(&active).unwrap();
             std::fs::write(active.join("__init__.py"), "RETAINED_RUNTIME_DEPENDENCY").unwrap();
-            let error = build_plan()
+            let source = build_plan()
                 .await
-                .err()
-                .expect("selected dependencies require a Python installer ABI");
-            assert!(
-                error
-                    .to_string()
-                    .contains("matching build and serving Python minors"),
-                "{error:#}"
+                .unwrap()
+                .materialize_source_bundle(true, RuntimeDependencyPackaging::Embedded)
+                .unwrap();
+            let unpacked = crate::test_support::unpack_source_bundle(&source);
+            assert_eq!(
+                std::fs::read_to_string(
+                    unpacked
+                        .path()
+                        .join(selected.site_packages_root())
+                        .join("active/__init__.py")
+                )
+                .unwrap(),
+                "RETAINED_RUNTIME_DEPENDENCY"
             );
         }
     }

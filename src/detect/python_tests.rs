@@ -201,7 +201,7 @@ fn detects_requirements_project_as_python_process() {
     assert_eq!(result.metadata.runtime.runtime_type, RuntimeType::Python);
     assert_eq!(
         result.metadata.runtime.version.as_deref(),
-        Some(nrz_source_bundle::PythonMinor::default().version())
+        Some(nrz_source_bundle::PythonMinor::default().version().as_str())
     );
     let package_manager = result.metadata.package_manager.unwrap();
     assert_eq!(package_manager.pm_type, PackageManagerType::Pip);
@@ -415,7 +415,7 @@ fn python_stage_markers_use_the_frozen_target_and_keep_unknown_inputs_conservati
             );
         }
         for key in ["python_full_version", "implementation_version"] {
-            for (operator, required) in [("==", true), ("!=", false)] {
+            for (operator, required) in [("==", true), ("!=", true)] {
                 let requirement = format!("colorama; {key} {operator} '{}'", minor.exact_version());
                 std::fs::write(project.path().join("requirements.txt"), &requirement).unwrap();
                 assert_eq!(
@@ -514,13 +514,13 @@ fn python_stage_markers_use_the_frozen_target_and_keep_unknown_inputs_conservati
             ("platform='linux win32'".to_string(), true),
             ("python='<3.12'".to_string(), false),
             (format!("python='=={}'", minor.exact_version()), true),
-            (format!("python='!={}'", minor.exact_version()), false),
+            (format!("python='!={}'", minor.exact_version()), true),
             ("python='>=3.12', platform='win32'".to_string(), false),
             ("python='<3.12', platform='linux'".to_string(), false),
             ("python='>=3.12', platform='linux'".to_string(), true),
             (format!("python='=={}'", minor.version()), true),
             (format!("python='!={}'", minor.version()), true),
-            (format!("python='<={}'", minor.version()), false),
+            (format!("python='<={}'", minor.version()), true),
             (format!("python='>{}'", minor.version()), true),
             (format!("python='<{}'", minor.version()), false),
             (format!("python='>={}'", minor.version()), true),
@@ -571,6 +571,67 @@ fn python_stage_markers_use_the_frozen_target_and_keep_unknown_inputs_conservati
                 required,
                 "{minor:?}: {alternatives}"
             );
+        }
+    }
+}
+
+#[test]
+fn code_only_python_markers_keep_platform_facts_without_inventing_a_minor() {
+    use super::python::requires_dependency_stage_for_runtime;
+    let project = tempfile::tempdir().unwrap();
+    let fs = LocalFs::new(project.path());
+    for (requirement, required) in [
+        ("colorama; sys_platform == 'win32'", false),
+        ("colorama; platform_machine == 'aarch64'", false),
+        ("colorama; sys_platform == 'linux'", true),
+        ("colorama; python_version < '3.12'", true),
+        ("colorama; python_version >= '3.12'", true),
+        ("colorama; python_full_version < '3.12.1'", true),
+    ] {
+        std::fs::write(project.path().join("requirements.txt"), requirement).unwrap();
+        assert_eq!(
+            requires_dependency_stage_for_runtime(&fs, None).unwrap(),
+            required,
+            "{requirement}"
+        );
+    }
+}
+
+#[test]
+fn witnessed_python_minor_keeps_unknown_prerelease_patch_requirements() {
+    use super::python::requires_dependency_stage_for_target;
+    let project = tempfile::tempdir().unwrap();
+    let fs = LocalFs::new(project.path());
+    for suffix in ["dev1", "a1", "rc1"] {
+        for operator in ["==", "<"] {
+            let marker = format!("python_full_version {operator} '3.12.0{suffix}'");
+            for manifest in ["requirements.txt", "pyproject.toml", "poetry"] {
+                if manifest == "requirements.txt" {
+                    std::fs::write(project.path().join(manifest), format!("acme; {marker}"))
+                        .unwrap();
+                } else {
+                    let text = if manifest == "poetry" {
+                        std::fs::write(project.path().join("poetry.lock"), "").unwrap();
+                        format!(
+                            "[tool.poetry]\npackage-mode=false\n[tool.poetry.dependencies]\nacme={{version='*',markers=\"{marker}\"}}\n"
+                        )
+                    } else {
+                        format!("[project]\ndependencies=[\"acme; {marker}\"]\n")
+                    };
+                    std::fs::write(project.path().join("pyproject.toml"), text).unwrap();
+                }
+                assert!(
+                    requires_dependency_stage_for_target(
+                        &fs,
+                        nrz_source_bundle::PythonMinor::Python312
+                    )
+                    .unwrap(),
+                    "{manifest}/{marker}"
+                );
+                for path in ["requirements.txt", "pyproject.toml", "poetry.lock"] {
+                    let _ = std::fs::remove_file(project.path().join(path));
+                }
+            }
         }
     }
 }
@@ -760,15 +821,16 @@ fn python_package_mode_belongs_to_the_selected_lock_owner() {
 
 #[test]
 fn python_minor_selection_is_frozen_but_not_part_of_normalized_launch_intent() {
-    for minor in nrz_source_bundle::PythonMinor::ALL {
+    for version in nrz_source_bundle::PythonMinor::ALL
+        .into_iter()
+        .map(|minor| minor.version())
+        .chain(["2.7", "3.11", "3.14.9", "4.x"].map(str::to_string))
+    {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
         std::fs::write(
             dir.path().join("onreza.toml"),
-            format!(
-                "[deploy]\nruntime='python'\npython_version='{}'\n",
-                minor.version()
-            ),
+            format!("[deploy]\nruntime='python'\npython_version='{}'\n", version),
         )
         .unwrap();
         let mut detection = detect(dir.path());
@@ -783,23 +845,23 @@ fn python_minor_selection_is_frozen_but_not_part_of_normalized_launch_intent() {
             .unwrap()
             .application_runtime
             .unwrap();
-        assert_eq!(declaration.python_version, Some(minor));
+        assert_eq!(declaration.python_version, Some(version.clone()));
         assert_eq!(
             detection.metadata.runtime.version.as_deref(),
-            Some(minor.version())
+            Some(version.as_str())
         );
         let wire = serde_json::to_value(&declaration).unwrap();
-        assert_eq!(wire["pythonVersion"], minor.version());
+        assert_eq!(wire["pythonVersion"], version);
         let normalized = serde_json::to_value(declaration.intent()).unwrap();
         assert!(normalized.get("pythonVersion").is_none());
         assert!(normalized.get("entry").is_none());
     }
-    for value in ["3.11", "3.15", "3.14.8"] {
+    for value in ["2.7", "3.11", "3.14.9", "4.x"] {
         assert!(
             serde_json::from_value::<nrz_source_bundle::ApplicationRuntimeDeclaration>(
                 serde_json::json!({"family":"PYTHON", "pythonVersion":value, "args":[]})
             )
-            .is_err()
+            .is_ok()
         );
     }
     let declaration: nrz_source_bundle::ApplicationRuntimeDeclaration = serde_json::from_value(
@@ -840,7 +902,7 @@ fn declared_python_launch_replaces_incidental_javascript_defaults() {
             .install_command
             .as_deref()
             .unwrap()
-            .starts_with("python3.12 ")
+            .starts_with("python3 ")
     );
     assert!(
         !build
@@ -1315,7 +1377,7 @@ fn source_build_context_separates_static_python_tools_and_serving() {
         assert_eq!(detection.suggested_compute, ComputeType::Static);
         assert_eq!(
             detection.metadata.runtime.version.as_deref(),
-            Some(minor.version())
+            Some(minor.version().as_str())
         );
         let virtual_fs=VirtualFs::from_json(&serde_json::json!({"tree":["requirements.txt","onreza.toml"],"files":{"requirements.txt":"mkdocs\n","onreza.toml":text}}).to_string()).unwrap();
         let mut remote = detect_with_fs(&virtual_fs);
@@ -1467,9 +1529,9 @@ fn source_build_context_defaults_follow_compiler_manager_and_python_minors() {
         assert_eq!(
             context.application_runtime.unwrap().python_version,
             Some(if config.contains("3.14") {
-                nrz_source_bundle::PythonMinor::Python314
+                nrz_source_bundle::PythonMinor::Python314.version()
             } else {
-                nrz_source_bundle::PythonMinor::Python312
+                nrz_source_bundle::PythonMinor::Python312.version()
             })
         );
     }

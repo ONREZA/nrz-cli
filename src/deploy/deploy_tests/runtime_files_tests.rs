@@ -124,7 +124,7 @@ fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata()
     let manifest = build_manifest::generate_compute_manifest("main.py");
     let scanned = scan_runtime_artifact(
         dir.path(),
-        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
     )
     .unwrap();
     let collection = prepare_artifact_files(
@@ -132,7 +132,7 @@ fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata()
         scanned,
         &detection,
         crate::artifact::ArtifactRootScope::ProjectRoot,
-        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
         true,
     );
     let deployable = collection.deployable_entries();
@@ -152,7 +152,7 @@ fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata()
         dir.path(),
         &manifest,
         &deployable,
-        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
         crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
         Some(crate::artifact::source_bundle_v1::RuntimeReadinessContract::Http("/healthz")),
     )
@@ -212,7 +212,7 @@ fn python_scan_excludes_local_environments_and_keeps_the_frozen_bootstrap() {
     }
     let scanned = scan_runtime_artifact(
         dir.path(),
-        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
     )
     .unwrap();
     let paths = scanned
@@ -239,7 +239,7 @@ fn python_scan_excludes_local_environments_and_keeps_the_frozen_bootstrap() {
         scanned,
         &detection,
         crate::artifact::ArtifactRootScope::ProjectRoot,
-        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
         true,
     )
     .deployable_entries();
@@ -255,7 +255,9 @@ fn python_scan_excludes_local_environments_and_keeps_the_frozen_bootstrap() {
         assert!(
             scan_runtime_artifact(
                 dir.path(),
-                &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default())
+                &RuntimeArtifactScan::PythonRuntimeRoot(Some(
+                    nrz_source_bundle::PythonMinor::default()
+                ))
             )
             .is_err()
         );
@@ -689,8 +691,7 @@ fn relocated_python_runtime_preserves_compute_file_ownership() {
     let mut detection =
         crate::detect::detect_with_framework_override(project.path(), Some("other"));
     detection.metadata.runtime.runtime_type = RuntimeType::Python;
-    detection.metadata.runtime.version =
-        Some(nrz_source_bundle::PythonMinor::default().version().into());
+    detection.metadata.runtime.version = Some(nrz_source_bundle::PythonMinor::default().version());
     let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
         "version": 2,
         "layers": [
@@ -763,7 +764,7 @@ fn relocated_python_runtime_preserves_compute_file_ownership() {
         plan.source_size_bytes,
         &wire,
         &[],
-        Some(nrz_source_bundle::PythonMinor::default().target()),
+        Some(&nrz_source_bundle::PythonMinor::default().target()),
     )
     .unwrap();
     assert_eq!(
@@ -1142,9 +1143,11 @@ fn python_runtime_scan_excludes_a_previous_build_for_another_minor() {
         .unwrap();
     }
     for minor in nrz_source_bundle::PythonMinor::ALL {
-        let scanned =
-            scan_runtime_artifact(dir.path(), &RuntimeArtifactScan::PythonRuntimeRoot(minor))
-                .unwrap();
+        let scanned = scan_runtime_artifact(
+            dir.path(),
+            &RuntimeArtifactScan::PythonRuntimeRoot(Some(minor)),
+        )
+        .unwrap();
         let paths = scanned
             .iter()
             .map(|file| file.path.as_str())
@@ -1174,7 +1177,7 @@ fn mixed_python_minors_keep_dependencies_with_their_declared_owner() {
         schema_version: 1,
         build_toolchain: BuildToolchainDeclaration {
             family: BuildToolchainFamily::Python,
-            python_version: Some(PythonMinor::Python314),
+            python_version: Some(PythonMinor::Python314.version()),
         },
         application_runtime: None,
     });
@@ -1294,7 +1297,7 @@ fn hoisted_javascript_dependencies_survive_a_code_only_python_sibling() {
                 build_toolchain: BuildToolchainDeclaration {
                     family: compiler,
                     python_version: (compiler == BuildToolchainFamily::Python)
-                        .then_some(nrz_source_bundle::PythonMinor::Python314),
+                        .then_some(nrz_source_bundle::PythonMinor::Python314.version()),
                 },
                 application_runtime: Some(ApplicationRuntimeDeclaration {
                     family: ApplicationRuntimeFamily::Node,
@@ -1468,6 +1471,47 @@ fn standalone_output_owns_dependencies_with_source_install_present() {
         assert_eq!(
             String::from_utf8_lossy(&result.stdout).trim(),
             "STANDALONE_OK"
+        );
+    }
+}
+
+#[test]
+fn non_python_runtime_ignores_unowned_python_stage_roots() {
+    for framework in ["hono", "node"] {
+        let directory = tempdir().unwrap();
+        fs::write(directory.path().join("server.js"), "console.log('ready')").unwrap();
+        for minor in ["3.12", "3.13"] {
+            let root = directory
+                .path()
+                .join(format!(".onreza/python/{minor}/site-packages"));
+            fs::create_dir_all(&root).unwrap();
+            fs::write(root.join("unowned.py"), "VALUE = 1").unwrap();
+        }
+        let detection =
+            crate::detect::detect_with_framework_override(directory.path(), Some(framework));
+        let artifact = resolve_runtime_artifact(
+            directory.path(),
+            directory.path(),
+            directory.path().into(),
+            build_manifest::generate_compute_manifest("server.js"),
+            &detection,
+            true,
+        )
+        .unwrap();
+        let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+        let collection = prepare_artifact_files(
+            &artifact.manifest,
+            scanned,
+            &detection,
+            crate::artifact::ArtifactRootScope::ProjectRoot,
+            &artifact.scan,
+            true,
+        );
+        assert!(
+            !collection
+                .deployable_entries()
+                .iter()
+                .any(|entry| entry.path.starts_with(".onreza/python/"))
         );
     }
 }

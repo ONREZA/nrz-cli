@@ -122,7 +122,19 @@ pub fn materialize_source_bundle_runtime(
                     .layer_name
                     .as_ref()
                     .and_then(|name| targets.get(name))
-                    .is_some_and(|target| target != &version)
+                    .is_some_and(|target| {
+                        target != &version
+                            && !(target == "node"
+                                && nrz_runtime_artifact::RuntimeProfile::node_build_target(
+                                    &version,
+                                )
+                                .is_some())
+                            && !(target == "python"
+                                && nrz_runtime_artifact::RuntimeProfile::python_build_target(
+                                    &version,
+                                )
+                                .is_some())
+                    })
         })
     {
         return Err(RuntimeArtifactError::Invariant(
@@ -231,9 +243,8 @@ fn dependency_root_matches_kind(root: &str, kind: DependencyMaterializationKind)
             .split('/')
             .next_back()
             .is_some_and(|component| component == "node_modules"),
-        DependencyMaterializationKind::PythonSitePackages => PythonMinor::ALL
-            .into_iter()
-            .any(|minor| root == minor.site_packages_root()),
+        DependencyMaterializationKind::PythonSitePackages => PythonMinor::for_dependency_path(root)
+            .is_some_and(|minor| root == minor.site_packages_root()),
     }
 }
 
@@ -318,7 +329,8 @@ fn freeze_layer_targets(
         let foreign_javascript_interpreter =
             intent.as_ref().is_some_and(|intent| match intent.family {
                 nrz_source_bundle::ApplicationRuntimeFamily::Bun => {
-                    primary_target.starts_with("node-")
+                    nrz_runtime_artifact::RuntimeProfile::node_build_target(primary_target)
+                        .is_some()
                 }
                 nrz_source_bundle::ApplicationRuntimeFamily::Node => {
                     primary_target.starts_with("bun-")
@@ -360,12 +372,24 @@ fn freeze_layer_targets(
     }
     // One policy still materializes one dependency kind. A sibling with no
     // dependency tree contributes only its immutable author declaration.
-    for (layer, _) in siblings {
+    for (layer, family) in siblings {
         let target = layer
             .runtime_config
             .as_ref()
             .and_then(|c| c.get("buildRuntimeVersion"))
             .and_then(Value::as_str)
+            .or_else(|| {
+                match nrz_source_bundle::layer_application_runtime(layer.runtime_config.as_ref())
+                    .ok()
+                    .flatten()
+                    .map(|intent| intent.family)
+                {
+                    Some(nrz_source_bundle::ApplicationRuntimeFamily::Node) => Some("node"),
+                    Some(nrz_source_bundle::ApplicationRuntimeFamily::Python) => Some("python"),
+                    _ if family == "PYTHON" => Some("python"),
+                    _ => None,
+                }
+            })
             .ok_or_else(|| {
                 RuntimeArtifactError::Invariant(format!(
                     "managed sibling '{}' requires a frozen build runtime declaration",

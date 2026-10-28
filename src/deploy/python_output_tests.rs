@@ -26,7 +26,7 @@ fn generated_python_state_is_gitignored_for_manual_project_configuration() {
     super::super::python_launch::materialize_python_entry(
         project.path(),
         &launch,
-        PythonMinor::default(),
+        Some(PythonMinor::default()),
     )
     .unwrap();
     for path in [
@@ -89,7 +89,7 @@ async fn authored_local_build_rejects_python_owned_native_output() {
 
 #[test]
 fn python_output_guard_uses_retained_layer_and_dependency_custody() {
-    use crate::artifact::{ArtifactRootScope, RuntimeArtifact, RuntimeArtifactScan};
+    use crate::artifact::{RuntimeArtifact, RuntimeArtifactScan};
     for (path, bytes, rejected) in [
         ("native-host.so", b"HOST_EXTENSION".as_slice(), true),
         (
@@ -138,17 +138,9 @@ fn python_output_guard_uses_retained_layer_and_dependency_custody() {
         let artifact = RuntimeArtifact {
             root_dir: project.path().to_path_buf(),
             manifest,
-            scan: RuntimeArtifactScan::PythonRuntimeRoot(PythonMinor::default()),
+            scan: RuntimeArtifactScan::PythonRuntimeRoot(Some(PythonMinor::default())),
         };
-        let scanned =
-            super::super::scan::scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
-        let files = crate::artifact::classify_artifact_files(
-            &artifact.manifest,
-            scanned,
-            &crate::detect::detect(project.path()),
-            ArtifactRootScope::ProjectRoot,
-            &artifact.scan,
-        );
+        let files = classify_python_artifact(&artifact);
         assert_eq!(
             validate_local_python_build_output(&artifact, &files).is_err(),
             rejected,
@@ -180,7 +172,7 @@ fn scanned_python_output(
                 "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}
             }]
         })).unwrap(),
-        scan: crate::artifact::RuntimeArtifactScan::PythonRuntimeRoot(PythonMinor::default()),
+        scan: crate::artifact::RuntimeArtifactScan::PythonRuntimeRoot(Some(PythonMinor::default())),
     };
     let root = nrz_runtime_artifact::ArtifactRoot::open(project_dir).unwrap();
     let files = crate::artifact::classify_artifact_files(
@@ -320,4 +312,18 @@ fn pure_python_and_java_stage_resources_remain_portable_on_non_linux_hosts() {
         )
         .unwrap();
     }
+}
+
+pub(super) fn classify_python_artifact(
+    artifact: &crate::artifact::RuntimeArtifact,
+) -> crate::artifact::ArtifactFileCollection {
+    let scanned =
+        super::super::scan::scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    crate::artifact::classify_artifact_files(
+        &artifact.manifest,
+        scanned,
+        &crate::detect::detect(&artifact.root_dir),
+        crate::artifact::ArtifactRootScope::ProjectRoot,
+        &artifact.scan,
+    )
 }

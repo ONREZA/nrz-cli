@@ -92,7 +92,7 @@ fn requirements_install_uses_managed_python_and_copy_materialization() {
             PythonInstallMode::ManagedLocal,
             "linux",
             "x86_64",
-            nrz_source_bundle::PythonMinor::default()
+            nrz_source_bundle::PythonMinor::default(),
         )
         .unwrap()
         .arguments,
@@ -100,8 +100,8 @@ fn requirements_install_uses_managed_python_and_copy_materialization() {
             "pip",
             "install",
             "--python",
-            "3.14.9",
-            "--managed-python",
+            "python3",
+            "--no-python-downloads",
             "--link-mode",
             "copy",
             "--target",
@@ -122,7 +122,7 @@ fn requirements_install_uses_managed_python_and_copy_materialization() {
             PythonInstallMode::ManagedLocal,
             "linux",
             "x86_64",
-            nrz_source_bundle::PythonMinor::default()
+            nrz_source_bundle::PythonMinor::default(),
         )
         .unwrap()
         .display
@@ -258,6 +258,7 @@ fn uv_locked_plan_excludes_dev_and_installs_the_project_separately() {
         "linux",
         "x86_64",
         nrz_source_bundle::PythonMinor::default(),
+        None,
     )
     .unwrap();
     assert_eq!(commands.len(), 5);
@@ -363,6 +364,7 @@ fn poetry_platform_plan_uses_frozen_tools_and_validates_both_python_constraints(
         "linux",
         "x86_64",
         nrz_source_bundle::PythonMinor::default(),
+        None,
     )
     .unwrap();
     assert_eq!(commands.len(), 6);
@@ -413,7 +415,8 @@ fn python_generated_directory_rejects_an_external_symlink_before_creating_childr
             PythonInstallMode::ManagedLocal,
             "linux",
             "x86_64",
-            nrz_source_bundle::PythonMinor::default()
+            nrz_source_bundle::PythonMinor::default(),
+            None,
         )
         .unwrap_err()
         .to_string()
@@ -496,7 +499,15 @@ async fn python_uv_real_lock_src_package_and_stale_lock_qualification() {
             manifest.replace("packaging==26.3", "packaging==26.2"),
         )
         .unwrap();
-        let commands = install_commands(project.path(), mode, "linux", "x86_64", minor).unwrap();
+        let commands = install_commands(
+            project.path(),
+            mode,
+            "linux",
+            "x86_64",
+            minor,
+            Some(&qualification_interpreter(&uv, minor)),
+        )
+        .unwrap();
         let export = commands
             .iter()
             .find(|command| command.display.contains("validate and export uv.lock"))
@@ -537,7 +548,15 @@ async fn python_uv_real_lock_src_package_and_stale_lock_qualification() {
             ),
         )
         .unwrap();
-        let commands = install_commands(project.path(), mode, "linux", "x86_64", minor).unwrap();
+        let commands = install_commands(
+            project.path(),
+            mode,
+            "linux",
+            "x86_64",
+            minor,
+            Some(&qualification_interpreter(&uv, minor)),
+        )
+        .unwrap();
         let validation = commands
             .iter()
             .find(|command| command.display.ends_with("validate requires-python"))
@@ -660,8 +679,15 @@ async fn python_poetry_real_old_and_pep621_project_and_stale_lock_qualification(
                 manifest.replace("26.3", "26.2"),
             )
             .unwrap();
-            let commands =
-                install_commands(project.path(), mode, "linux", "x86_64", minor).unwrap();
+            let commands = install_commands(
+                project.path(),
+                mode,
+                "linux",
+                "x86_64",
+                minor,
+                Some(&qualification_interpreter(&uv, minor)),
+            )
+            .unwrap();
             let check = commands
                 .iter()
                 .find(|command| {
@@ -727,6 +753,7 @@ async fn python_local_rejects_native_payload_in_mislabeled_none_any_wheel() {
         "linux",
         "x86_64",
         nrz_source_bundle::PythonMinor::default(),
+        None,
     )
     .unwrap()
     {
@@ -776,8 +803,16 @@ fn run_plan_with_environment(
     environment: &[(String, String)],
     minor: nrz_source_bundle::PythonMinor,
 ) {
-    for command in
-        install_commands(project, qualification_mode(), "linux", "x86_64", minor).unwrap()
+    let interpreter = qualification_interpreter(uv, minor);
+    for command in install_commands(
+        project,
+        qualification_mode(),
+        "linux",
+        "x86_64",
+        minor,
+        Some(&interpreter),
+    )
+    .unwrap()
     {
         if let Some(directory) = &command.portable_wheel_directory {
             super::python_toolchain::qualify_portable_application_wheels(project, directory)
@@ -835,7 +870,8 @@ fn python_export_and_wheel_outputs_reject_external_symlinks() {
                 PythonInstallMode::ManagedLocal,
                 "linux",
                 "x86_64",
-                nrz_source_bundle::PythonMinor::default()
+                nrz_source_bundle::PythonMinor::default(),
+                None,
             )
             .is_err(),
             "{output} must be confined before any tool writes"
@@ -899,7 +935,8 @@ fn python_requirements_and_setup_package_use_one_authored_dependency_graph() {
             PythonInstallMode::ManagedLocal,
             "linux",
             "x86_64",
-            nrz_source_bundle::PythonMinor::default()
+            nrz_source_bundle::PythonMinor::default(),
+            None,
         )
         .is_err()
     );
@@ -909,6 +946,7 @@ fn python_requirements_and_setup_package_use_one_authored_dependency_graph() {
         "linux",
         "x86_64",
         nrz_source_bundle::PythonMinor::default(),
+        None,
     )
     .unwrap();
     assert_eq!(commands.len(), 3);
@@ -931,20 +969,22 @@ async fn python_constraints_validate_the_application_patch_instead_of_the_tools_
         "[project]\nname='demo'\nversion='1.0'\nrequires-python='>=3.12,<3.13'\n",
     )
     .unwrap();
+    let uv = super::python_toolchain::resolve_for(qualification_mode())
+        .await
+        .unwrap();
+    let interpreter = qualification_interpreter(&uv, nrz_source_bundle::PythonMinor::Python312);
     let commands = install_commands(
         project.path(),
         PythonInstallMode::PinnedPlatform,
         "linux",
         "x86_64",
         nrz_source_bundle::PythonMinor::Python312,
+        Some(&interpreter),
     )
     .unwrap();
     // Execute the generated validator on a different interpreter. The validator's
     // dependencies come from the tools environment; target identity remains argv.
     let validation = &commands[1];
-    let uv = super::python_toolchain::resolve_for(qualification_mode())
-        .await
-        .unwrap();
     let execute = |arguments: &[OsString]| {
         if qualification_mode() == PythonInstallMode::PinnedPlatform {
             return std::process::Command::new(&validation.program)
@@ -974,7 +1014,7 @@ async fn python_constraints_validate_the_application_patch_instead_of_the_tools_
     );
     let mut wrong_target = validation.arguments.clone();
     *wrong_target.last_mut().unwrap() =
-        OsString::from(nrz_source_bundle::PythonMinor::Python314.exact_version());
+        qualification_interpreter(&uv, nrz_source_bundle::PythonMinor::Python314).into_os_string();
     let output = execute(&wrong_target);
     assert!(!output.status.success());
     assert!(
@@ -1055,14 +1095,14 @@ async fn export_qualification_artifact(
     let mut manifest = crate::build::manifest::generate_compute_manifest(source_entry);
     let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
         family: nrz_source_bundle::ApplicationRuntimeFamily::Python,
-        python_version: Some(minor),
+        python_version: Some(minor.version()),
         entry: Some(source_entry.into()),
         args: args.to_vec(),
     };
     crate::deploy::apply_application_runtime_manifest(
         &mut manifest,
         Some(&declaration),
-        Some(minor.target()),
+        Some(&minor.target()),
         "other",
     )
     .unwrap();
@@ -1070,7 +1110,7 @@ async fn export_qualification_artifact(
         project,
         &manifest,
         &crate::deploy::scan_dir(project).unwrap(),
-        &crate::artifact::RuntimeArtifactScan::PythonRuntimeRoot(minor),
+        &crate::artifact::RuntimeArtifactScan::PythonRuntimeRoot(Some(minor)),
         crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
         None,
     )
@@ -1086,7 +1126,7 @@ async fn export_qualification_artifact(
         serde_json::from_value(verified.logical_manifest).unwrap();
     let launch = nrz_runtime_artifact::source_layer_launch_for_target(
         logical.layers[0].runtime_config.as_ref(),
-        Some(minor.target()),
+        Some(&minor.target()),
     )
     .unwrap();
     assert_eq!(
@@ -1265,7 +1305,7 @@ async fn real_mkdocs_static_builds_publish_without_process_runtime() {
     .unwrap();
     let mut config = nrz::config::ProjectConfig::default();
     config.build.toolchain = Some(nrz_source_bundle::BuildToolchainFamily::Python);
-    config.build.python_version = Some(minor);
+    config.build.python_version = Some(minor.version());
     config.build.command = Some(format!(
         "python -c \"import sys; assert '.'.join(map(str, sys.version_info[:3])) == '{}'\" && mkdocs build --strict",
         minor.exact_version()
@@ -1494,172 +1534,185 @@ async fn python_published_nonroot_output_keeps_project_owned_bootstrap() {
 }
 
 #[tokio::test]
-async fn different_python_minors_preserve_code_only_and_reject_runtime_dependencies() {
-    let project = tempfile::tempdir().unwrap();
-    std::fs::write(project.path().join("main.py"), "print('ready')\n").unwrap();
-    let mut config = nrz::config::ProjectConfig::default();
-    config.build.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
-    config.build.output_directory = Some(".".into());
-    config.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python314);
-    config.deploy.entry = Some("main.py".into());
-    crate::deploy::test_support::write_project_config(project.path(), &config);
-    let (command, args) = crate::deploy::test_support::deploy_context(
-        project.path(),
-        &config,
-        &["--skip-install", "--skip-build"],
-    );
-    for (requirements, dependencies) in [
-        ("", false),
-        ("# no runtime dependencies\n", false),
-        ("packaging==26.3\n", true),
-        ("-r production.txt\n", true),
-        ("./wheels/acme-1.0-py3-none-any.whl\n", true),
-        ("../localproject\n", true),
-    ] {
-        std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
-        let result = crate::deploy::test_support::build_plan(&args, &command, &[]).await;
-        if dependencies {
-            assert!(
-                result
+async fn typed_python_layers_preserve_actual_owned_dependency_targets() {
+    use nrz_source_bundle::{BuildToolchainFamily, PythonMinor};
+
+    for hint in ["3.14", "4.x"] {
+        let unlisted = PythonMinor::from_version("3.11").unwrap();
+        for (target, python_dependencies, javascript_dependencies, node_layer, accepted) in [
+            (unlisted, None, false, false, true),
+            (unlisted, Some(unlisted), false, false, true),
+            (PythonMinor::Python312, None, false, false, true),
+            (PythonMinor::Python312, None, false, true, true),
+            (
+                PythonMinor::Python312,
+                Some(PythonMinor::Python312),
+                false,
+                false,
+                true,
+            ),
+            (
+                PythonMinor::Python312,
+                Some(PythonMinor::Python314),
+                false,
+                false,
+                false,
+            ),
+            (
+                PythonMinor::Python314,
+                Some(PythonMinor::Python314),
+                false,
+                true,
+                true,
+            ),
+            (
+                PythonMinor::Python314,
+                Some(PythonMinor::Python314),
+                true,
+                true,
+                false,
+            ),
+        ] {
+            let target_version = format!("{}.9", target.target());
+            let project = tempfile::tempdir().unwrap();
+            std::fs::write(project.path().join("main.py"), "print('ready')\n").unwrap();
+            std::fs::create_dir_all(project.path().join("node")).unwrap();
+            std::fs::write(project.path().join("node/server.js"), "require('demo')\n").unwrap();
+            std::fs::write(project.path().join("index.html"), "<h1>ready</h1>").unwrap();
+            let mut config = nrz::config::ProjectConfig::default();
+            config.project.framework = Some("static-html".into());
+            config.build.toolchain = Some(BuildToolchainFamily::Python);
+            config.build.python_version = Some(hint.to_owned());
+            config.build.output_directory = Some(".".into());
+            crate::deploy::test_support::write_project_config(project.path(), &config);
+            if let Some(stage_minor) = python_dependencies {
+                let dependencies = project.path().join(stage_minor.site_packages_root());
+                if stage_minor != target {
+                    std::fs::write(project.path().join("requirements.txt"), "demo==1.0\n").unwrap();
+                }
+                std::fs::create_dir_all(&dependencies).unwrap();
+                std::fs::write(dependencies.join("demo.py"), "VALUE = 42\n").unwrap();
+            }
+            if javascript_dependencies {
+                let dependencies = project.path().join("node_modules/demo");
+                std::fs::create_dir_all(&dependencies).unwrap();
+                std::fs::write(dependencies.join("index.js"), "module.exports = 42\n").unwrap();
+            }
+            let mut layers = vec![serde_json::json!({
+                "name":"api", "target":"COMPUTE", "directory":".", "entry":"main.py",
+                "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},
+                    "buildRuntimeVersion":target_version}
+            })];
+            if node_layer {
+                layers.push(serde_json::json!({
+            "name":"node", "target":"COMPUTE", "directory":"node", "entry":"server.js",
+            "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}
+        }));
+            }
+            std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
+            std::fs::write(
+                project.path().join(".onreza/manifest.json"),
+                serde_json::to_vec(&serde_json::json!({
+                    "version":2, "layers":layers, "routes":[{"pattern":"^/.*$","layer":"api"}]
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let (command, args) = crate::deploy::test_support::deploy_context(
+                project.path(),
+                &config,
+                &["--skip-install", "--skip-build"],
+            );
+            let result = crate::deploy::test_support::build_plan(&args, &command, &[]).await;
+            if accepted {
+                let plan = result.unwrap();
+                assert!(
+                    plan.artifact
+                        .build
+                        .detection
+                        .metadata
+                        .source_build_context
+                        .as_ref()
+                        .unwrap()
+                        .application_runtime
+                        .is_none()
+                );
+                let source = plan.materialize_source_bundle(true, crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization).unwrap();
+                let logical: nrz_source_bundle::SourceLogicalManifest =
+                    serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
+                        .unwrap();
+                nrz_runtime_artifact::validate_source_bundle_application_graph(
+                    &source.logical_manifest_sha256,
+                    &source.source_sha256,
+                    source.source_size_bytes,
+                    &logical,
+                )
+                .unwrap();
+                crate::test_support::assert_compute_layer_entrypoints(&logical);
+                assert_eq!(source.logical_manifest.files.iter().filter(|file| file.role == crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency).count(), usize::from(python_dependencies.is_some()));
+                assert_eq!(
+                    source.logical_manifest.layers[0]
+                        .runtime_config
+                        .as_ref()
+                        .unwrap()["buildRuntimeVersion"],
+                    target_version
+                );
+                if node_layer {
+                    assert_eq!(
+                        source.logical_manifest.layers[1]
+                            .runtime_config
+                            .as_ref()
+                            .unwrap()["buildRuntimeVersion"],
+                        "node-24"
+                    );
+                }
+                if python_dependencies.is_some() {
+                    let dependency = source.logical_manifest.files.iter().find(|file| file.role == crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency).unwrap();
+                    assert_eq!(dependency.layer_name.as_deref(), Some("api"));
+                }
+            } else {
+                let error = result
                     .err()
-                    .unwrap()
-                    .to_string()
-                    .contains("matching build and serving Python minors")
-            );
-        } else {
-            let plan = result.unwrap();
-            let manifest = &plan.artifact.runtime.manifest;
-            assert_eq!(
-                manifest.layers[0]
-                    .runtime
-                    .as_ref()
-                    .unwrap()
-                    .build_runtime_version
-                    .as_deref(),
-                Some("python-3.14")
-            );
-            let source = plan.materialize_source_bundle(true, crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization).unwrap();
-            assert!(source.logical_manifest.files.iter().all(|file| file.role
-                != crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency));
+                    .expect("missing owned Python stage or mixed dependency closures must fail");
+                assert!(
+                    error
+                        .chain()
+                        .filter_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+                        .any(|error| error.code
+                            == if python_dependencies.is_some_and(|stage| stage != target) {
+                                "MISSING_RUNTIME_DEPENDENCIES"
+                            } else {
+                                "APPLICATION_RUNTIME_INVALID"
+                            }),
+                    "{error:#}"
+                );
+            }
         }
     }
 }
 
-#[tokio::test]
-async fn typed_python_layers_cannot_replace_the_selected_dependency_abi() {
-    use nrz_source_bundle::{BuildToolchainFamily, PythonMinor};
-
-    for (target, python_dependencies, javascript_dependencies, node_layer, accepted) in [
-        (PythonMinor::Python312, false, false, false, true),
-        (PythonMinor::Python312, false, false, true, true),
-        (PythonMinor::Python312, true, false, false, false),
-        (PythonMinor::Python314, true, false, true, true),
-        (PythonMinor::Python314, true, true, true, false),
-    ] {
-        let project = tempfile::tempdir().unwrap();
-        std::fs::write(project.path().join("main.py"), "print('ready')\n").unwrap();
-        std::fs::create_dir_all(project.path().join("node")).unwrap();
-        std::fs::write(project.path().join("node/server.js"), "require('demo')\n").unwrap();
-        std::fs::write(project.path().join("index.html"), "<h1>ready</h1>").unwrap();
-        let mut config = nrz::config::ProjectConfig::default();
-        config.project.framework = Some("static-html".into());
-        config.build.toolchain = Some(BuildToolchainFamily::Python);
-        config.build.python_version = Some(PythonMinor::Python314);
-        config.build.output_directory = Some(".".into());
-        crate::deploy::test_support::write_project_config(project.path(), &config);
-        if python_dependencies {
-            let dependencies = project.path().join(target.site_packages_root());
-            std::fs::create_dir_all(&dependencies).unwrap();
-            std::fs::write(dependencies.join("demo.py"), "VALUE = 42\n").unwrap();
-        }
-        if javascript_dependencies {
-            let dependencies = project.path().join("node_modules/demo");
-            std::fs::create_dir_all(&dependencies).unwrap();
-            std::fs::write(dependencies.join("index.js"), "module.exports = 42\n").unwrap();
-        }
-        let mut layers = vec![serde_json::json!({
-            "name":"api", "target":"COMPUTE", "directory":".", "entry":"main.py",
-            "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},
-                "buildRuntimeVersion":target.target()}
-        })];
-        if node_layer {
-            layers.push(serde_json::json!({
-            "name":"node", "target":"COMPUTE", "directory":"node", "entry":"server.js",
-            "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}
-        }));
-        }
-        std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
-        std::fs::write(
-            project.path().join(".onreza/manifest.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "version":2, "layers":layers, "routes":[{"pattern":"^/.*$","layer":"api"}]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        let (command, args) = crate::deploy::test_support::deploy_context(
-            project.path(),
-            &config,
-            &["--skip-install", "--skip-build"],
-        );
-        let result = crate::deploy::test_support::build_plan(&args, &command, &[]).await;
-        if accepted {
-            let plan = result.unwrap();
-            assert!(
-                plan.artifact
-                    .build
-                    .detection
-                    .metadata
-                    .source_build_context
-                    .as_ref()
-                    .unwrap()
-                    .application_runtime
-                    .is_none()
-            );
-            let source = plan.materialize_source_bundle(true, crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization).unwrap();
-            let logical: nrz_source_bundle::SourceLogicalManifest =
-                serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
-                    .unwrap();
-            nrz_runtime_artifact::validate_source_bundle_application_graph(
-                &source.logical_manifest_sha256,
-                &source.source_sha256,
-                source.source_size_bytes,
-                &logical,
-            )
-            .unwrap();
-            crate::test_support::assert_compute_layer_entrypoints(&logical);
-            assert_eq!(source.logical_manifest.files.iter().filter(|file| file.role == crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency).count(), usize::from(python_dependencies));
-            assert_eq!(
-                source.logical_manifest.layers[0]
-                    .runtime_config
-                    .as_ref()
-                    .unwrap()["buildRuntimeVersion"],
-                target.target()
-            );
-            if node_layer {
-                assert_eq!(
-                    source.logical_manifest.layers[1]
-                        .runtime_config
-                        .as_ref()
-                        .unwrap()["buildRuntimeVersion"],
-                    "node-24"
-                );
-            }
-            if python_dependencies {
-                let dependency = source.logical_manifest.files.iter().find(|file| file.role == crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency).unwrap();
-                assert_eq!(dependency.layer_name.as_deref(), Some("api"));
-            }
-        } else {
-            let error = result
-                .err()
-                .expect("foreign dependency ABI must fail before scanning or publication");
-            assert!(
-                error
-                    .chain()
-                    .filter_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
-                    .any(|error| error.code == "APPLICATION_RUNTIME_INVALID"),
-                "{error:#}"
-            );
-        }
-    }
+#[test]
+fn python_install_uses_the_observed_executable_without_catalog_lookup() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("requirements.txt"), "demo==1.0\n").unwrap();
+    let actual = nrz_source_bundle::PythonMinor::from_version("3.11").unwrap();
+    let selected = std::path::Path::new("/selected/bin/python3");
+    let commands = install_commands(
+        project.path(),
+        PythonInstallMode::ManagedLocal,
+        "linux",
+        "x86_64",
+        actual,
+        Some(selected),
+    )
+    .unwrap();
+    assert_eq!(commands.len(), 1);
+    let arguments = &commands[0].arguments;
+    assert!(
+        arguments
+            .windows(2)
+            .any(|pair| pair == [OsString::from("--python"), selected.as_os_str().to_owned()])
+    );
+    assert!(arguments.contains(&OsString::from("--no-python-downloads")));
+    assert!(arguments.contains(&OsString::from(".onreza/python/3.11/site-packages")));
 }

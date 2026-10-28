@@ -22,7 +22,7 @@ use crate::artifact::{
 use crate::build;
 use crate::build::manifest as build_manifest;
 use crate::cli::{BuildArgs, DeployArgs};
-use crate::detect::types::{ComputeType, RuntimeType};
+use crate::detect::types::ComputeType;
 use crate::output;
 
 #[cfg(test)]
@@ -134,7 +134,6 @@ pub(super) struct DeployPlan {
     pub(super) has_compute_layer: bool,
     pub(super) health_check: Option<super::ResolvedHealthCheck>,
     pub(super) warnings: Vec<String>,
-    runtime_policy_lineage: Option<(String, String)>,
     retained_platform_output: bool,
 }
 
@@ -165,14 +164,7 @@ impl DeployPlan {
                 structure: detection.metadata.structure.clone(),
                 runtime: format!("{:?}", detection.metadata.runtime.runtime_type).to_lowercase(),
                 runtime_version: detection.metadata.runtime.version.clone(),
-                python_patch_version: detection
-                    .metadata
-                    .runtime
-                    .version
-                    .as_deref()
-                    .filter(|_| detection.metadata.runtime.runtime_type == RuntimeType::Python)
-                    .and_then(nrz_source_bundle::PythonMinor::from_version)
-                    .map(|minor| minor.exact_version().to_string()),
+                python_patch_version: None,
             },
             source_build_context: command
                 .effective
@@ -333,10 +325,7 @@ impl DeployPlan {
                     RuntimeReadinessContract::Http,
                 )
             }),
-            runtime_policy_lineage: self
-                .runtime_policy_lineage
-                .as_ref()
-                .map(|(layer, lineage)| (layer.as_str(), lineage.as_str())),
+            runtime_policy_lineage: None,
         }
     }
 
@@ -535,7 +524,8 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         request.execution_env,
     )
     .await?;
-    if request.platform_runner {
+    let python_interpreter = resolved.python_interpreter;
+    if request.platform_runner || !args.skip_build {
         resolved_effective.bind_resolved_platform_context(
             resolved.context.clone(),
             resolved.application_target,
@@ -563,6 +553,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             request.execution_env,
             request.build_logs,
             request.platform_runner,
+            python_interpreter.as_deref(),
         )
         .await?
     } else {
@@ -611,14 +602,6 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         && build_command
             .as_ref()
             .is_some_and(|command| !command.trim().is_empty());
-    validate_python_dependency_context(
-        project_dir,
-        if install.executed || actual_build_planned {
-            &source_build_context
-        } else {
-            retained_context.unwrap_or(&source_build_context)
-        },
-    )?;
     if actual_build_planned
         && let Some(minor) = source_build_context.build_toolchain.resolved_python_minor()
     {
@@ -627,9 +610,14 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         } else {
             super::python_toolchain::PythonInstallMode::ManagedLocal
         };
-        let python_env =
-            super::python_toolchain::build_environment(project_dir, mode, minor, &build_env)
-                .await?;
+        let python_env = super::python_toolchain::build_environment(
+            project_dir,
+            mode,
+            minor,
+            &build_env,
+            python_interpreter.as_deref(),
+        )
+        .await?;
         build_env = super::merge_command_environment(&build_env, &python_env);
     }
     let mut build_executed = false;
@@ -659,6 +647,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     {
         source_build_context = original.clone();
     }
+    let mut materialized_python_launch = None;
     if let Some(declaration) =
         source_build_context
             .application_runtime
@@ -672,17 +661,15 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             .clone()
             .context("Python launch entry is absent")?;
         if build_executed || install.executed || !project_dir.join(&entry).is_file() {
-            super::python_launch::materialize_python_entry(
-                project_dir,
-                &crate::detect::python_launch::PythonLaunch {
-                    entry,
-                    args: declaration.args.clone(),
-                },
-                declaration.python_version.unwrap_or_default(),
-            )
-            .map_err(|error| {
-                output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
-            })?;
+            let launch = crate::detect::python_launch::PythonLaunch {
+                entry,
+                args: declaration.args.clone(),
+            };
+            // Entry validation precedes closure planning; finalize its dependency root below.
+            super::python_launch::materialize_python_entry(project_dir, &launch, None).map_err(
+                |error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")),
+            )?;
+            materialized_python_launch = Some(launch);
         }
     }
 
@@ -705,7 +692,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         output::Phase::Deploy,
     );
     let mut publication_effective = effective.clone();
-    if build_executed || install.executed {
+    if build_executed || (install.executed && !install.authored) {
         publication_effective.mark_primary_runtime_rebuilt();
     }
     let effective = &publication_effective;
@@ -861,13 +848,6 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         .transpose()
         .context("failed to serialize manifest")?;
 
-    let mut application_runtime = super::application_runtime_in_output(
-        build_artifact.detection.metadata.application_runtime(),
-        project_dir,
-        &build_artifact.output_dir,
-        effective.deploy_entry().is_some(),
-    );
-
     if compute == ComputeType::Process && !has_build_manifest {
         let process_entry_root = if effective.deploy_entry().is_none()
             && build_artifact
@@ -902,7 +882,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         match entry {
             Some(entry) => {
                 let mut auto = build_manifest::generate_compute_manifest(&entry);
-                application_runtime = super::application_runtime_in_output(
+                let application_runtime = super::application_runtime_in_output(
                     build_artifact.detection.metadata.application_runtime(),
                     project_dir,
                     process_entry_root,
@@ -961,52 +941,6 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     let manifest_for_planning: build_manifest::Manifest =
         serde_json::from_value(manifest_raw.clone())
             .context("failed to parse resolved deployment manifest")?;
-    // Bind the validated owner before relocation changes artifact-relative paths.
-    let runtime_policy_lineage = if effective.primary_runtime_rebuilt()
-        && super::manifest_has_compute_layer(&manifest_for_planning)
-    {
-        if let Some(original) = command
-            .effective
-            .platform_source_build_context()
-            .and_then(|context| context.application_runtime.as_ref())
-        {
-            let lineage = match original.family {
-                nrz_source_bundle::ApplicationRuntimeFamily::Bun => Some("BUN:CURRENT".to_string()),
-                nrz_source_bundle::ApplicationRuntimeFamily::Node => Some(format!(
-                    "NODE:{}",
-                    command
-                        .effective
-                        .node_version()
-                        .context("original Node lineage is missing")?
-                        .strip_prefix("NODE_")
-                        .context("original Node lineage is invalid")?
-                )),
-                nrz_source_bundle::ApplicationRuntimeFamily::Python => Some(format!(
-                    "PYTHON:{}",
-                    original
-                        .python_version
-                        .context("original Python lineage is missing")?
-                        .version()
-                )),
-                nrz_source_bundle::ApplicationRuntimeFamily::Executable => None,
-            };
-            if let Some(lineage) = lineage {
-                let declaration = application_runtime
-                    .as_ref()
-                    .context("runtime policy application declaration is missing")?;
-                let index =
-                    super::select_application_runtime_primary(&manifest_for_planning, declaration)?
-                        .context("runtime policy primary layer is missing")?;
-                Some((manifest_for_planning.layers[index].name.clone(), lineage))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
     let mut runtime_artifact = super::resolve_runtime_artifact_with_manifest_source(
         &command.root_dir,
         project_dir,
@@ -1016,13 +950,15 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         json,
         deployment_manifest_source,
     )?;
-    if let Some((primary, _)) = &runtime_policy_lineage {
-        anyhow::ensure!(
-            runtime_artifact.manifest.layers.iter().any(|layer| {
-                layer.name == *primary && layer.target == build_manifest::LayerTarget::Compute
-            }),
-            "runtime policy primary layer is missing after artifact relocation"
-        );
+    if let Some(launch) = materialized_python_launch {
+        super::python_launch::materialize_python_entry(
+            project_dir,
+            &launch,
+            super::selected_python_runtime_minor(project_dir, Some(&runtime_artifact.manifest))?,
+        )
+        .map_err(|error| {
+            output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
+        })?;
     }
     if native_recipe == Some(crate::detect::native::NativeRecipe::FlutterWeb) {
         super::native_build::apply_flutter_static_cache_policy(&mut runtime_artifact.manifest);
@@ -1109,7 +1045,6 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         requires_python_dependencies,
         &runtime_artifact,
         &artifact_files,
-        &build_artifact.detection,
     )?;
     super::python_toolchain::validate_retained_python_native_platform_rooted(
         &artifact_root,
@@ -1176,7 +1111,6 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         has_compute_layer,
         health_check,
         warnings,
-        runtime_policy_lineage,
         retained_platform_output: request.platform_runner && !build_executed && !install.executed,
     })
 }
@@ -1254,39 +1188,4 @@ fn artifact_root_scope(runtime_root: &Path, project_dir: &Path) -> ArtifactRootS
     } else {
         ArtifactRootScope::BuildOutput
     }
-}
-
-fn validate_python_dependency_context(
-    project_dir: &Path,
-    context: &nrz_source_bundle::SourceBuildContext,
-) -> anyhow::Result<()> {
-    let Some(serving) = context
-        .application_runtime
-        .as_ref()
-        .filter(|runtime| runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
-    else {
-        return Ok(());
-    };
-    let build_minor = context.build_toolchain.resolved_python_minor();
-    if build_minor == serving.python_version {
-        return Ok(());
-    }
-    let fs = crate::detect::fs::LocalFs::new(project_dir);
-    let authored_dependencies = crate::detect::python::requires_dependency_stage_for_target(
-        &fs,
-        serving.python_version.unwrap_or_default(),
-    )?;
-    let staged_dependencies = serving.python_version.is_some_and(|minor| {
-        project_dir
-            .join(minor.site_packages_root())
-            .read_dir()
-            .is_ok_and(|mut entries| entries.next().is_some())
-    });
-    if authored_dependencies || staged_dependencies {
-        return Err(output::coded_error(
-            "APPLICATION_RUNTIME_INVALID",
-            "Python runtime dependencies require matching build and serving Python minors; independent toolchains are supported for code-only output",
-        ));
-    }
-    Ok(())
 }

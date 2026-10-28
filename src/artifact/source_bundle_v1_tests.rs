@@ -362,7 +362,7 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
         dir.path(),
         &manifest,
         &files,
-        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
         RuntimeDependencyPackaging::TrustedMaterialization,
         None,
     )
@@ -427,7 +427,7 @@ async fn python_bundle_without_dependencies_freezes_provided_build_manifest_targ
         dir.path(),
         &manifest,
         &scan_dir(dir.path()).unwrap(),
-        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
         RuntimeDependencyPackaging::TrustedMaterialization,
         None,
     )
@@ -488,7 +488,7 @@ async fn mixed_python_node_and_native_bundle_preserves_per_layer_runtime_authori
                 Family::Python,
                 "main.py",
                 "python-3.12",
-                RuntimeArtifactScan::PythonRuntimeRoot(PythonMinor::Python312),
+                RuntimeArtifactScan::PythonRuntimeRoot(Some(PythonMinor::Python312)),
             )
         } else {
             (
@@ -502,7 +502,7 @@ async fn mixed_python_node_and_native_bundle_preserves_per_layer_runtime_authori
             family,
             entry: Some(entry.into()),
             args: vec![],
-            python_version: primary_python.then_some(PythonMinor::Python312),
+            python_version: primary_python.then_some(PythonMinor::Python312.version()),
         };
         crate::deploy::apply_application_runtime_manifest(
             &mut manifest,
@@ -866,7 +866,8 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
     )
     .unwrap();
     let mut context = detection.metadata.source_build_context.clone().unwrap();
-    context.build_toolchain.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
+    context.build_toolchain.python_version =
+        Some(nrz_source_bundle::PythonMinor::Python312.version());
     let declaration = context.application_runtime.as_mut().unwrap();
     if selected.starts_with("node-") {
         declaration.family = nrz_source_bundle::ApplicationRuntimeFamily::Node;
@@ -877,7 +878,7 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
         declaration.python_version = None;
         declaration.entry = Some("server.js".into());
     } else {
-        declaration.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
+        declaration.python_version = Some(nrz_source_bundle::PythonMinor::Python312.version());
     }
     let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
         directory.path().to_owned(),
@@ -907,12 +908,12 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
     );
     assert_eq!(
         resolved.context.build_toolchain.python_version,
-        Some(nrz_source_bundle::PythonMinor::Python314)
+        Some(nrz_source_bundle::PythonMinor::Python314.version())
     );
     assert_eq!(effective.platform_source_build_context(), Some(&context));
     assert_eq!(
         context.build_toolchain.python_version,
-        Some(nrz_source_bundle::PythonMinor::Python312)
+        Some(nrz_source_bundle::PythonMinor::Python312.version())
     );
     if selected.starts_with("python-") {
         assert_eq!(
@@ -923,6 +924,7 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
                 .unwrap()
                 .python_version,
             nrz_source_bundle::PythonMinor::from_target(&selected)
+                .map(nrz_source_bundle::PythonMinor::version)
         );
     }
 

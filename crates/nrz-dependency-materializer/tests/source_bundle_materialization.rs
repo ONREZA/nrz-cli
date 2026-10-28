@@ -357,7 +357,7 @@ fn independent_code_only_serving_layers_keep_their_own_frozen_targets() {
 
         let root = nrz_source_bundle::PythonMinor::from_target(serving_target)
             .map(|minor| minor.site_packages_root())
-            .unwrap_or("node_modules");
+            .unwrap_or_else(|| "node_modules".into());
         manifest.files.push(source_file(
             &format!("{root}/pkg/index.py"),
             DEPENDENCY_BODY,
@@ -530,6 +530,27 @@ fn primary_dependencies_keep_their_build_target_while_siblings_use_their_frozen_
             json!({"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}),
             "NODE_22",
         ),
+        (
+            "bun",
+            "1.4.2",
+            "BUN",
+            json!({"applicationRuntime":{"family":"NODE","args":[]}}),
+            "NODE",
+        ),
+        (
+            "bun",
+            "1.4.2",
+            "BUN",
+            json!({"runtimeFamily":"PYTHON"}),
+            "CPYTHON",
+        ),
+        (
+            "javascript",
+            "node-24",
+            "NODE_24",
+            json!({"applicationRuntime":{"family":"PYTHON","args":[]}}),
+            "CPYTHON",
+        ),
     ] {
         let temp = TempDir::new().unwrap();
         let mut manifest = source_manifest();
@@ -607,44 +628,6 @@ fn primary_dependencies_keep_their_build_target_while_siblings_use_their_frozen_
             expected_profile
         );
         assert!(python.dependency_materialization_ids.is_empty());
-        // Without its own target, a same-family layer belongs to the primary policy.
-        if primary_family == "javascript" {
-            continue;
-        }
-        manifest.layers[1]
-            .runtime_config
-            .as_mut()
-            .unwrap()
-            .as_object_mut()
-            .unwrap()
-            .remove("buildRuntimeVersion");
-        let missing_root = temp.path().join("missing-sibling-runtime");
-        let error = materialize_source_bundle_runtime(
-            &fake_erofs_toolchain(temp.path()),
-            SourceBundleMaterializationRequest {
-                source_path: &temp.path().join("unused-source.tar.zst"),
-                logical_manifest_sha256: &manifest_sha,
-                source_sha256: &sha,
-                source_size_bytes: bytes.len() as u64,
-                manifest: &manifest,
-                output_root: &missing_root,
-                policy: SourceBundleMaterializationPolicy {
-                    kind: Some(DependencyMaterializationKind::JavaScriptNodeModules),
-                    compatibility: primary_compatibility,
-                    tree_limits: tree_limits(),
-                    max_total_files: 10,
-                    max_total_bytes: 1024,
-                },
-            },
-        )
-        .err()
-        .unwrap();
-        assert!(
-            error
-                .to_string()
-                .contains("frozen build runtime declaration")
-        );
-        assert!(!missing_root.exists());
     }
 }
 
@@ -671,25 +654,17 @@ fn a_sibling_declaration_never_allows_a_foreign_dependency_kind() {
     manifest.files.push(dependency);
     let source_path = temp.path().join("foreign-deps.tar.zst");
     write_source_bundle(&source_path, &manifest);
-    let bytes = fs::read(&source_path).unwrap();
-    let result = materialize_source_bundle_runtime(
-        &fake_erofs_toolchain(temp.path()),
-        SourceBundleMaterializationRequest {
-            source_path: &source_path,
-            logical_manifest_sha256: &compute_logical_manifest_sha256(
-                &serde_json::to_value(&manifest).unwrap(),
-            ),
-            source_sha256: &sha256_hex(&bytes),
-            source_size_bytes: bytes.len() as u64,
-            manifest: &manifest,
-            output_root: &temp.path().join("foreign-runtime"),
-            policy: SourceBundleMaterializationPolicy {
-                kind: Some(DependencyMaterializationKind::JavaScriptNodeModules),
-                compatibility: compatibility(),
-                tree_limits: tree_limits(),
-                max_total_files: 10,
-                max_total_bytes: 1024,
-            },
+    let result = materialize_source_fixture(
+        temp.path(),
+        &source_path,
+        &manifest,
+        &temp.path().join("foreign-runtime"),
+        SourceBundleMaterializationPolicy {
+            kind: Some(DependencyMaterializationKind::JavaScriptNodeModules),
+            compatibility: compatibility(),
+            tree_limits: tree_limits(),
+            max_total_files: 10,
+            max_total_bytes: 1024,
         },
     );
     assert!(matches!(
@@ -751,11 +726,11 @@ fn runtime_intent_and_version_mismatch_fail_before_any_materialization_io() {
             "requires a frozen build runtime declaration",
         ),
         (
-            json!({"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-25"}),
+            json!({"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-025"}),
             "application runtime",
         ),
         (
-            json!({"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.15"}),
+            json!({"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.015"}),
             "application runtime",
         ),
         (
@@ -893,6 +868,33 @@ fn materializes_a_manifest_owned_cross_tree_dependency_symlink() {
     );
     assert_eq!(next.manifest.wire().symlink_count, 1);
     assert_eq!(result.graph.wire().dependencies.len(), 2);
+}
+
+fn materialize_source_fixture(
+    root: &Path,
+    source_path: &Path,
+    manifest: &SourceLogicalManifest,
+    output_root: &Path,
+    policy: SourceBundleMaterializationPolicy,
+) -> Result<
+    nrz_dependency_materializer::MaterializedSourceBundleRuntime,
+    nrz_dependency_materializer::SourceBundleMaterializationError,
+> {
+    let bytes = fs::read(source_path).unwrap();
+    materialize_source_bundle_runtime(
+        &fake_erofs_toolchain(root),
+        SourceBundleMaterializationRequest {
+            source_path,
+            logical_manifest_sha256: &compute_logical_manifest_sha256(
+                &serde_json::to_value(manifest).unwrap(),
+            ),
+            source_sha256: &sha256_hex(&bytes),
+            source_size_bytes: bytes.len() as u64,
+            manifest,
+            output_root,
+            policy,
+        },
+    )
 }
 
 fn source_manifest() -> SourceLogicalManifest {
@@ -1671,6 +1673,72 @@ fn real_python_native_platform_materialization() {
             &bytes,
             DependencyMaterializationKind::PythonSitePackages,
             accepted,
+        );
+    }
+}
+
+#[test]
+fn family_only_python_layer_preserves_an_independent_known_dependency_target_and_root() {
+    for minor in ["3.11", "3.12"] {
+        let temp = TempDir::new().unwrap();
+        let mut manifest = source_manifest();
+        manifest.layers[0].runtime_config = Some(
+            json!({"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python"}),
+        );
+        manifest.files[1].path = format!(".onreza/python/{minor}/site-packages/pkg/index.js");
+        let source_path = temp.path().join("source.tar.zst");
+        write_source_bundle(&source_path, &manifest);
+        let mut compatibility = compatibility();
+        compatibility["runtimeFamily"] = json!("python");
+        compatibility["runtimeVersion"] = json!("python-3.11.9");
+        let result = materialize_source_fixture(
+            temp.path(),
+            &source_path,
+            &manifest,
+            &temp.path().join("runtime"),
+            SourceBundleMaterializationPolicy {
+                kind: Some(DependencyMaterializationKind::PythonSitePackages),
+                compatibility,
+                tree_limits: tree_limits(),
+                max_total_files: 10,
+                max_total_bytes: 1024,
+            },
+        );
+        if minor == "3.12" {
+            assert!(
+                result
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("dependency root differs")
+            );
+            assert!(!temp.path().join("runtime").exists());
+            continue;
+        }
+        let result = result.unwrap();
+        assert_eq!(
+            result.graph.wire().runtime_layers[0]
+                .launch
+                .as_ref()
+                .unwrap()
+                .profile
+                .to_string(),
+            "CPYTHON"
+        );
+        assert_eq!(
+            result.graph.wire().dependencies[0]
+                .compatibility
+                .runtime_version
+                .as_str(),
+            "python-3.11.9"
+        );
+        assert_eq!(
+            result.graph.wire().dependencies[0].mount_point.as_str(),
+            "/output/.onreza/python/3.11/site-packages"
+        );
+        assert_eq!(
+            serde_json::to_value(&result.dependencies[0].manifest.wire().compatibility).unwrap()["runtimeVersion"],
+            "python-3.11.9"
         );
     }
 }

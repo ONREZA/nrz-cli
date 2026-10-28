@@ -189,11 +189,7 @@ pub fn install_command(pm: PackageManagerType) -> &'static str {
         PackageManagerType::Yarn => "yarn install",
         PackageManagerType::Pnpm => "pnpm install",
         PackageManagerType::Bun => "bun install",
-        PackageManagerType::Pip => match nrz_source_bundle::PythonMinor::default() {
-            nrz_source_bundle::PythonMinor::Python312 => "python3.12 -m pip install .",
-            nrz_source_bundle::PythonMinor::Python313 => "python3.13 -m pip install .",
-            nrz_source_bundle::PythonMinor::Python314 => "python3.14 -m pip install .",
-        },
+        PackageManagerType::Pip => "python3 -m pip install .",
         PackageManagerType::Uv => "uv sync --locked --no-dev",
         PackageManagerType::Poetry => "poetry install --only main",
         PackageManagerType::Pub => "dart pub get --enforce-lockfile",

@@ -25,6 +25,11 @@ pub fn supported_bun_build_target(target: &str) -> bool {
         })
 }
 
+/// Check build provenance syntax independently of the support catalog.
+pub fn canonical_node_build_target(target: &str) -> bool {
+    nrz_contract::RuntimeProfile::node_build_target(target).is_some()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ApplicationRuntimeFamily {
     #[serde(rename = "BUN", alias = "bun")]
@@ -62,9 +67,10 @@ pub struct ApplicationRuntimeDeclaration {
     #[serde(
         default,
         rename = "pythonVersion",
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::python::deserialize_python_version_declaration"
     )]
-    pub python_version: Option<crate::PythonMinor>,
+    pub python_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry: Option<String>,
     pub args: Vec<String>,
@@ -74,6 +80,9 @@ impl ApplicationRuntimeDeclaration {
     pub fn validate(&self) -> Result<(), String> {
         if self.python_version.is_some() && self.family != ApplicationRuntimeFamily::Python {
             return Err("pythonVersion is only valid for PYTHON applications".into());
+        }
+        if let Some(version) = self.python_version.as_deref() {
+            crate::python::validate_runtime_version_declaration(version)?;
         }
         if let Some(entry) = &self.entry {
             if entry.len() > 4096 || entry.contains(':') {
@@ -90,12 +99,6 @@ impl ApplicationRuntimeDeclaration {
     pub fn validate_target(&self, target: Option<&str>) -> Result<(), String> {
         self.validate()?;
         validate_runtime_target(self.family, target)?;
-        if self
-            .python_version
-            .is_some_and(|minor| Some(minor.target()) != target)
-        {
-            return Err("selected pythonVersion conflicts with frozen build target".into());
-        }
         Ok(())
     }
     pub fn intent(&self) -> ApplicationRuntimeIntent {
@@ -136,11 +139,11 @@ fn validate_runtime_target(
         (ApplicationRuntimeFamily::Bun, None) => true,
         (ApplicationRuntimeFamily::Bun, Some(version)) => supported_bun_build_target(version),
         (ApplicationRuntimeFamily::Node, Some(version)) => {
-            matches!(version, "node-22" | "node-24" | "node-26")
+            nrz_contract::RuntimeProfile::node_build_target(version).is_some()
         }
         (ApplicationRuntimeFamily::Node, None) => false,
         (ApplicationRuntimeFamily::Python, Some(version)) => {
-            crate::PythonMinor::from_target(version).is_some()
+            nrz_contract::RuntimeProfile::python_build_target(version).is_some()
         }
         (ApplicationRuntimeFamily::Executable, Some("native-linux-x86_64-glibc")) => true,
         (ApplicationRuntimeFamily::Python | ApplicationRuntimeFamily::Executable, _) => false,

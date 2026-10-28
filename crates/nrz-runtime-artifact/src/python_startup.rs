@@ -11,7 +11,7 @@ pub const PYTHON_SITE_PACKAGES_INITIALIZER: &str =
 #[must_use]
 pub fn python_script_launch_arguments(
     entry: &str,
-    dependency_root: &str,
+    dependency_root: Option<&str>,
     application_root: &str,
 ) -> Vec<String> {
     vec![
@@ -23,7 +23,7 @@ pub fn python_script_launch_arguments(
             include_str!("../assets/python-script-launcher.py")
         ),
         application_root.into(),
-        dependency_root.into(),
+        dependency_root.unwrap_or_default().into(),
         entry.into(),
     ]
 }

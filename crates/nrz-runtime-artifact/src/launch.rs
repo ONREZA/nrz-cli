@@ -4,7 +4,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 
-/// Compile existing SOURCE_BUNDLE declarations into a closed runtime profile.
+/// Compile existing SOURCE_BUNDLE declarations into an immutable runtime profile.
 /// No host command, shell expansion or environment secrets enter this artifact.
 pub fn source_layer_launch(
     config: Option<&Value>,
@@ -21,6 +21,21 @@ pub fn source_layer_launch_for_target(
         .map_err(RuntimeArtifactError::Invariant)?;
     let application = nrz_source_bundle::layer_application_runtime(config)
         .map_err(RuntimeArtifactError::Invariant)?;
+    // An absent compiler witness carries only the explicit language family.
+    // A present witness was checked against independent custody above.
+    let runtime_version =
+        runtime_version.or_else(|| match application.as_ref().map(|intent| intent.family) {
+            Some(nrz_source_bundle::ApplicationRuntimeFamily::Node) => Some("node"),
+            Some(nrz_source_bundle::ApplicationRuntimeFamily::Python) => Some("python"),
+            _ if config
+                .and_then(|config| config.get("runtimeFamily"))
+                .and_then(Value::as_str)
+                == Some("PYTHON") =>
+            {
+                Some("python")
+            }
+            _ => None,
+        });
     if let Some(intent) = &application {
         intent
             .validate_target(runtime_version)
@@ -33,7 +48,7 @@ pub fn source_layer_launch_for_target(
         .and_then(Value::as_bool)
         == Some(true)
     {
-        "EXECUTABLE"
+        "EXECUTABLE".to_owned()
     } else if application
         .as_ref()
         .is_some_and(|intent| intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
@@ -43,23 +58,27 @@ pub fn source_layer_launch_for_target(
             == Some("PYTHON")
     {
         runtime_version
-            .and_then(nrz_source_bundle::PythonMinor::from_target)
+            .and_then(RuntimeProfile::python_build_target)
             .ok_or_else(|| {
                 RuntimeArtifactError::Invariant(
-                    "Python layer requires a supported frozen target".into(),
+                    "Python layer requires a canonical frozen target".into(),
                 )
             })?
-            .profile_name()
+            .to_string()
     } else {
         match runtime_version {
-            None => "BUN",
-            Some("node-22") => "NODE_22",
-            Some("node-24") => "NODE_24",
-            Some("node-26") => "NODE_26",
+            None => "BUN".to_owned(),
+            Some(version) if RuntimeProfile::node_build_target(version).is_some() => {
+                RuntimeProfile::node_build_target(version)
+                    .ok_or_else(|| {
+                        RuntimeArtifactError::Invariant("invalid Node build target syntax".into())
+                    })?
+                    .to_string()
+            }
             Some(version)
                 if nrz_source_bundle::application_runtime::supported_bun_build_target(version) =>
             {
-                "BUN"
+                "BUN".to_owned()
             }
             Some(version) => {
                 return invariant(format!("unsupported JavaScript runtime target '{version}'"));
@@ -91,10 +110,8 @@ pub(crate) fn verify_runtime_launch_family(
     use nrz_source_bundle::ApplicationRuntimeFamily as Family;
     let application_family = match profile {
         RuntimeProfile::Bun => Family::Bun,
-        RuntimeProfile::Node22 | RuntimeProfile::Node24 | RuntimeProfile::Node26 => Family::Node,
-        RuntimeProfile::Cpython312 | RuntimeProfile::Cpython313 | RuntimeProfile::Cpython314 => {
-            Family::Python
-        }
+        RuntimeProfile::NodeAny | RuntimeProfile::Node(_) => Family::Node,
+        RuntimeProfile::CpythonAny | RuntimeProfile::Cpython(_, _) => Family::Python,
         RuntimeProfile::Executable => Family::Executable,
     };
     if !application_family.matches_legacy_runtime_family(family) {
@@ -144,9 +161,9 @@ pub fn verify_runtime_launch(launch: &RuntimeLaunchWire) -> Result<(), RuntimeAr
 /// authorization and successor compatibility remain separate owner decisions.
 pub fn python_minor_for_profile(profile: RuntimeProfile) -> Option<nrz_source_bundle::PythonMinor> {
     match profile {
-        RuntimeProfile::Cpython312 => Some(nrz_source_bundle::PythonMinor::Python312),
-        RuntimeProfile::Cpython313 => Some(nrz_source_bundle::PythonMinor::Python313),
-        RuntimeProfile::Cpython314 => Some(nrz_source_bundle::PythonMinor::Python314),
+        RuntimeProfile::Cpython(major, minor) => {
+            nrz_source_bundle::PythonMinor::from_version(&format!("{major}.{minor}"))
+        }
         _ => None,
     }
 }

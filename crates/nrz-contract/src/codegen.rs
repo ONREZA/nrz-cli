@@ -38,14 +38,28 @@ pub fn generate(documents: &[SchemaDocument<'_>], header: &str) -> Result<String
 
         let mut settings = TypeSpaceSettings::default();
         settings.with_derive("PartialEq".to_owned());
+        if document.module == "runtime_artifact_graph" {
+            let source: serde_json::Value = serde_json::from_str(document.schema)?;
+            let profile = source.pointer("/properties/runtimeArtifactGraph/properties/runtimeLayers/items/properties/launch/properties/profile")
+                .context("runtime graph profile schema missing")?;
+            settings.with_conversion(
+                serde_json::from_value(profile.clone())?,
+                "crate::RuntimeProfile",
+                [].into_iter(),
+            );
+        }
         let mut type_space = TypeSpace::new(&settings);
         type_space
             .add_root_schema(root)
             .with_context(|| format!("typify {}", document.module))?;
         let body = type_space.to_stream();
+        let profile_alias = (document.module == "runtime_artifact_graph").then(|| quote! {
+            pub type OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile = crate::RuntimeProfile;
+        });
         items.extend(quote! {
             pub mod #module {
                 #body
+                #profile_alias
             }
         });
         if let Some(name) = document.embedded_constant {

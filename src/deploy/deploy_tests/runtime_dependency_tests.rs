@@ -228,11 +228,11 @@ async fn relocated_python_dependencies_keep_frozen_primary_owner() {
                             schema_version: 1,
                             build_toolchain: BuildToolchainDeclaration {
                                 family: BuildToolchainFamily::Python,
-                                python_version: Some(minor),
+                                python_version: Some(minor.version()),
                             },
                             application_runtime: Some(ApplicationRuntimeDeclaration {
                                 family: ApplicationRuntimeFamily::Python,
-                                python_version: Some(minor),
+                                python_version: Some(minor.version()),
                                 entry: Some(api_entry.clone()),
                                 args: vec![],
                             }),
@@ -370,7 +370,7 @@ fn relocated_python_dependencies_refuse_ambiguous_or_incompatible_primary() {
         for directory in [
             &format!("{prefix}api"),
             &format!("{prefix}side"),
-            PythonMinor::Python314.site_packages_root(),
+            &PythonMinor::Python314.site_packages_root(),
         ] {
             fs::create_dir_all(project.path().join(directory)).unwrap();
         }
@@ -397,11 +397,11 @@ fn relocated_python_dependencies_refuse_ambiguous_or_incompatible_primary() {
                     schema_version: 1,
                     build_toolchain: BuildToolchainDeclaration {
                         family: BuildToolchainFamily::Python,
-                        python_version: Some(PythonMinor::Python314),
+                        python_version: Some(PythonMinor::Python314.version()),
                     },
                     application_runtime: primary_entry.map(|entry| ApplicationRuntimeDeclaration {
                         family: ApplicationRuntimeFamily::Python,
-                        python_version: Some(PythonMinor::Python314),
+                        python_version: Some(PythonMinor::Python314.version()),
                         entry: Some(entry),
                         args: vec![],
                     }),
@@ -492,7 +492,7 @@ async fn assert_workspace_python_state_boundary(bootstrap: bool, package_metadat
         super::super::python_launch::materialize_python_entry(
             &project,
             &launch,
-            PythonMinor::Python312,
+            Some(PythonMinor::Python312),
         )
         .unwrap();
         fs::write(

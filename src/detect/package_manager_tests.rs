@@ -267,7 +267,7 @@ fn install_command_variants() {
     assert_eq!(install_command(PackageManagerType::Bun), "bun install");
     assert_eq!(
         install_command(PackageManagerType::Pip),
-        "python3.14 -m pip install ."
+        "python3 -m pip install ."
     );
 }
 

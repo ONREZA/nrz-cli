@@ -69,12 +69,12 @@ pub(super) fn scan_runtime_artifact_rooted(
 
 fn scan_python_root(
     owner: &ArtifactRoot,
-    minor: nrz_source_bundle::PythonMinor,
+    minor: Option<nrz_source_bundle::PythonMinor>,
     build_output: Option<&Path>,
 ) -> anyhow::Result<Vec<FileEntry>> {
     struct Pruning<'a> {
         project_package: bool,
-        minor: nrz_source_bundle::PythonMinor,
+        minor: Option<nrz_source_bundle::PythonMinor>,
         build_output: Option<&'a Path>,
     }
 
@@ -91,14 +91,16 @@ fn scan_python_root(
             let name = name.to_string_lossy();
             let ft = owner.file_type(&path, false)?;
             let relative = path.strip_prefix(base)?;
-            let staged_dependency = relative.starts_with(pruning.minor.site_packages_root());
+            let staged_dependency = pruning
+                .minor
+                .is_some_and(|minor| relative.starts_with(minor.site_packages_root()));
             if is_python_installer_staging_path(base, &path) {
                 continue;
             }
             // A previous build may leave another minor's incompatible wheel tree.
             if relative.parent() == Some(Path::new(".onreza/python"))
                 && nrz_source_bundle::PythonMinor::from_version(&name)
-                    .is_some_and(|other| other != pruning.minor)
+                    .is_some_and(|other| Some(other) != pruning.minor)
             {
                 continue;
             }

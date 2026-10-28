@@ -36,10 +36,8 @@ pub fn verify_execution_runtime_compatibility(
         .ok_or_else(|| RuntimeArtifactError::Invariant("execution layer has no launch".into()))?;
     let family = match launch.profile {
         RuntimeProfile::Bun => ExecutionRuntimeFamily::Bun,
-        RuntimeProfile::Node22 | RuntimeProfile::Node24 | RuntimeProfile::Node26 => {
-            ExecutionRuntimeFamily::Node
-        }
-        RuntimeProfile::Cpython312 | RuntimeProfile::Cpython313 | RuntimeProfile::Cpython314 => {
+        RuntimeProfile::NodeAny | RuntimeProfile::Node(_) => ExecutionRuntimeFamily::Node,
+        RuntimeProfile::CpythonAny | RuntimeProfile::Cpython(_, _) => {
             ExecutionRuntimeFamily::Python
         }
         RuntimeProfile::Executable => {

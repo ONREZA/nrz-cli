@@ -30,8 +30,8 @@ fn child_static_selection_clears_inherited_process_namespace() {
         parent.deploy.runtime = Some(family);
         parent.deploy.entry = Some("parent-entry".into());
         parent.deploy.args = Some(vec!["parent argument".into()]);
-        parent.deploy.python_version =
-            (family == Family::Python).then_some(nrz_source_bundle::PythonMinor::Python312);
+        parent.deploy.python_version = (family == Family::Python)
+            .then_some(nrz_source_bundle::PythonMinor::Python312.version());
         let mut child = ProjectConfig::default();
         child.deploy.compute = Some("static".into());
         let merged = parent.merge_child(child);
@@ -74,7 +74,8 @@ fn child_process_launch_replaces_inherited_static_compute() {
             "args" => child.deploy.args = Some(vec![]),
             "module" => child.deploy.module = Some("main".into()),
             "python_version" => {
-                child.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python312)
+                child.deploy.python_version =
+                    Some(nrz_source_bundle::PythonMinor::Python312.version())
             }
             _ => {
                 child.deploy.application = Some("main:app".into());
@@ -96,7 +97,7 @@ fn child_python_launch_after_static_parent_does_not_inherit_inactive_same_family
     parent.deploy.runtime = Some(Family::Python);
     parent.deploy.entry = Some("inactive-parent.py".into());
     parent.deploy.args = Some(vec!["inactive argument".into()]);
-    parent.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
+    parent.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python312.version());
     for explicit_runtime in [false, true] {
         let mut child = ProjectConfig::default();
         child.deploy.runtime = explicit_runtime.then_some(Family::Python);
@@ -121,7 +122,7 @@ fn child_compute_process_clears_static_parent_launch_defaults_but_keeps_process_
         parent.deploy.compute = Some(parent_compute.into());
         parent.deploy.runtime = Some(Family::Python);
         parent.deploy.module = Some("main".into());
-        parent.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
+        parent.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python312.version());
         parent.deploy.args = Some(vec!["parent argument".into()]);
         let mut child = ProjectConfig::default();
         child.deploy.compute = Some("process".into());
@@ -169,7 +170,10 @@ fn authored_child_static_process_fields_remain_invalid() {
             "module" => child.deploy.module = Some("main".into()),
             "application" => child.deploy.application = Some("main:app".into()),
             "server" => child.deploy.server = Some("asgi".into()),
-            _ => child.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python312),
+            _ => {
+                child.deploy.python_version =
+                    Some(nrz_source_bundle::PythonMinor::Python312.version())
+            }
         }
         let error = bind(&parent.merge_child(child)).unwrap_err();
         assert!(

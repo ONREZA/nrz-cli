@@ -88,13 +88,7 @@ pub fn validate_source_bundle_application_graph(
     for layer in &mut application.layers {
         let intent = nrz_source_bundle::layer_application_runtime(layer.runtime_config.as_ref())
             .map_err(RuntimeArtifactError::Invariant)?;
-        let unresolved_node = intent.as_ref().is_some_and(|intent| {
-            intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Node
-        }) && layer
-            .runtime_config
-            .as_ref()
-            .is_none_or(|config| config.get("buildRuntimeVersion").is_none());
-        if intent.is_some() && !unresolved_node {
+        if intent.is_some() {
             if let Some(target) = layer
                 .runtime_config
                 .as_ref()
@@ -104,7 +98,7 @@ pub fn validate_source_bundle_application_graph(
                 declared_targets.insert(layer.name.clone(), target.to_owned());
             }
         } else if let Some(config) = layer.runtime_config.as_mut().and_then(Value::as_object_mut) {
-            // DEPRECATED: legacy/unresolved Node keeps ownership-only preflight.
+            // DEPRECATED: untyped retained layers keep ownership-only preflight.
             config.remove(nrz_source_bundle::APPLICATION_RUNTIME_CONFIG_KEY);
             config.remove("buildRuntimeVersion");
         }
@@ -526,7 +520,7 @@ pub fn compile_source_runtime_layer_for_target(
     )?;
     if matches!(
         launch.profile,
-        RuntimeProfile::Node22 | RuntimeProfile::Node24 | RuntimeProfile::Node26
+        RuntimeProfile::NodeAny | RuntimeProfile::Node(_)
     ) && layer
         .runtime_config
         .as_ref()
@@ -667,6 +661,7 @@ mod tests {
             ("node-22", "NODE_22"),
             ("node-24", "NODE_24"),
             ("node-26", "NODE_26"),
+            ("node-25", "NODE_25"),
             ("bun-1.4.2", "BUN"),
         ] {
             let graph = finalize_source_bundle_runtime_graph_for_target(
@@ -695,7 +690,7 @@ mod tests {
                 1024,
                 &manifest(),
                 &[],
-                Some("node-25"),
+                Some("node-025"),
             )
             .is_err()
         );

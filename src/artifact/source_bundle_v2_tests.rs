@@ -221,7 +221,7 @@ fn dependency_roles_follow_explicit_direct_cli_or_builder_packaging() -> anyhow:
             "python-3.13",
             "server.py",
             ".onreza/python/3.13/site-packages/pkg/__init__.py",
-            RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::Python313),
+            RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::Python313)),
         ),
     ] {
         let source = tempdir()?;

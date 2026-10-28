@@ -7,7 +7,10 @@ pub mod manifest;
 mod path_graph;
 mod pax;
 pub mod python;
-pub use python::{PythonMinor, PythonToolchainVersions, python_toolchain_versions};
+pub use python::{
+    PythonMinor, PythonToolchainVersions, python_toolchain_versions,
+    validate_runtime_version_declaration,
+};
 pub mod source_build_context;
 pub mod source_bundle_v2;
 pub mod verifier;

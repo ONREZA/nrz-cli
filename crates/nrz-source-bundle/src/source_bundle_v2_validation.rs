@@ -326,11 +326,9 @@ fn validate_runtime_config(config: Option<&wire::RuntimeConfig>) -> Result<()> {
         }
         if let Some(target) = config.build_runtime_version.as_deref()
             && !crate::application_runtime::supported_bun_build_target(target)
-            && !matches!(
-                target,
-                "node-22" | "node-24" | "node-26" | "native-linux-x86_64-glibc"
-            )
-            && crate::PythonMinor::from_target(target).is_none()
+            && target != "native-linux-x86_64-glibc"
+            && nrz_contract::RuntimeProfile::node_build_target(target).is_none()
+            && nrz_contract::RuntimeProfile::python_build_target(target).is_none()
         {
             return invalid("unsupported buildRuntimeVersion syntax");
         }

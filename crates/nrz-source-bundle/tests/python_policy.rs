@@ -12,9 +12,9 @@ fn python_identities_match_the_generated_catalog_and_retain_exact_patch_pins() {
         PythonMinor::default().version()
     );
     for minor in PythonMinor::ALL {
-        assert_eq!(PythonMinor::from_target(minor.target()), Some(minor));
+        assert_eq!(PythonMinor::from_target(&minor.target()), Some(minor));
         assert_eq!(
-            PythonMinor::from_profile_name(minor.profile_name()),
+            PythonMinor::from_profile_name(&minor.profile_name()),
             Some(minor)
         );
         assert_eq!(
@@ -38,12 +38,9 @@ fn python_identities_match_the_generated_catalog_and_retain_exact_patch_pins() {
             json!({"family":"PYTHON","pythonVersion":minor.version(),"args":[]}),
         )
         .unwrap();
-        declaration.validate_target(Some(minor.target())).unwrap();
+        declaration.validate_target(Some(&minor.target())).unwrap();
         for other in PythonMinor::ALL {
-            assert_eq!(
-                declaration.validate_target(Some(other.target())).is_ok(),
-                other == minor
-            );
+            declaration.validate_target(Some(&other.target())).unwrap();
         }
     }
 }
@@ -67,4 +64,75 @@ fn bun_build_declarations_admit_canonical_versions_without_a_support_policy() {
             "{target}"
         );
     }
+}
+
+#[test]
+fn python_declarations_accept_canonical_minors_outside_the_toolchain_catalog() {
+    for version in ["2.7", "3.11", "3.15", "4.0", "123456789.987654321"] {
+        let minor = PythonMinor::from_version(version).unwrap();
+        assert_eq!(minor.version(), version);
+        assert_eq!(PythonMinor::from_target(&minor.target()), Some(minor));
+        assert_eq!(
+            PythonMinor::from_profile_name(&minor.profile_name()),
+            Some(minor)
+        );
+        assert_eq!(serde_json::to_value(minor).unwrap(), json!(version));
+        assert_eq!(
+            serde_json::from_value::<PythonMinor>(json!(version)).unwrap(),
+            minor
+        );
+        let dependency = format!(".onreza/python/{version}/site-packages/demo.py");
+        assert_eq!(PythonMinor::for_dependency_path(&dependency), Some(minor));
+        assert!(
+            PythonMinor::for_dependency_path(&format!(
+                ".onreza/python/{version}/site-packages-other/demo.py"
+            ))
+            .is_none()
+        );
+        let declaration: ApplicationRuntimeDeclaration =
+            serde_json::from_value(json!({"family":"PYTHON","pythonVersion":version,"args":[]}))
+                .unwrap();
+        declaration.validate_target(Some("python-3.14")).unwrap();
+    }
+    for version in [
+        "3",
+        "3.11.1",
+        "03.11",
+        "3.011",
+        "+3.11",
+        "3.-11",
+        "3.11 ",
+        "3.1000000000",
+    ] {
+        assert!(PythonMinor::from_version(version).is_none(), "{version}");
+        assert!(
+            serde_json::from_value::<PythonMinor>(json!(version)).is_err(),
+            "{version}"
+        );
+    }
+}
+
+#[test]
+fn python_declaration_hints_are_bounded_metadata_independent_of_actual_targets() {
+    for hint in ["2.7", "3.11", "3.14.9", "4.x", "  user supplied text  "] {
+        let value = json!({"family":"PYTHON", "pythonVersion":hint, "args":[]});
+        let declaration: ApplicationRuntimeDeclaration =
+            serde_json::from_value(value.clone()).unwrap();
+        declaration.validate_target(Some("python-3.14")).unwrap();
+        assert_eq!(serde_json::to_value(declaration).unwrap(), value);
+    }
+    for hint in [
+        String::new(),
+        "x".repeat(129),
+        "я".repeat(65),
+        "3.14\0".into(),
+    ] {
+        let value = json!({"family":"PYTHON", "pythonVersion":hint, "args":[]});
+        assert!(serde_json::from_value::<ApplicationRuntimeDeclaration>(value).is_err());
+    }
+    let declaration: ApplicationRuntimeDeclaration = serde_json::from_value(
+        json!({"family":"PYTHON", "pythonVersion":"я".repeat(64), "args":[]}),
+    )
+    .unwrap();
+    declaration.validate().unwrap();
 }

@@ -61,7 +61,7 @@ pub(crate) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
 pub(crate) enum RuntimeArtifactScan {
     All,
     NodeRuntimeRoot,
-    PythonRuntimeRoot(nrz_source_bundle::PythonMinor),
+    PythonRuntimeRoot(Option<nrz_source_bundle::PythonMinor>),
     Relocated {
         base: Box<RuntimeArtifactScan>,
         ownership: RuntimeArtifactSourceOwnership,
@@ -264,12 +264,16 @@ impl RuntimeArtifactScan {
     }
 
     pub(crate) fn is_python_runtime_root(&self) -> bool {
-        self.python_runtime_minor().is_some()
+        match self {
+            Self::PythonRuntimeRoot(_) => true,
+            Self::Relocated { base, .. } => base.is_python_runtime_root(),
+            _ => false,
+        }
     }
 
     fn python_runtime_minor(&self) -> Option<nrz_source_bundle::PythonMinor> {
         match self {
-            Self::PythonRuntimeRoot(minor) => Some(*minor),
+            Self::PythonRuntimeRoot(minor) => *minor,
             Self::Relocated { base, .. } => base.python_runtime_minor(),
             _ => None,
         }
@@ -868,16 +872,9 @@ fn is_platform_build_only_path(
                 .runtime
                 .as_ref()
                 .and_then(|runtime| runtime.build_runtime_version.as_deref())
-                .or_else(|| {
-                    primary
-                        .and_then(|runtime| runtime.python_version)
-                        .map(nrz_source_bundle::PythonMinor::target)
-                })
-                .or_else(|| {
-                    scan.python_runtime_minor()
-                        .map(nrz_source_bundle::PythonMinor::target)
-                })
-                != Some(minor.target());
+                .and_then(nrz_source_bundle::PythonMinor::from_target)
+                .or_else(|| scan.python_runtime_minor())
+                != Some(minor);
         }
         if relative == crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY
             && manifest.layers.iter().any(|published_layer| {

@@ -6,7 +6,7 @@ async fn skipped_python_install_requires_staged_bare_requirement_dependencies() 
     let mut config = nrz::config::ProjectConfig::default();
     config.build.output_directory = Some(".".into());
     config.deploy.runtime = Some(ApplicationRuntimeFamily::Python);
-    config.deploy.python_version = Some(PythonMinor::Python314);
+    config.deploy.python_version = Some(PythonMinor::Python314.version());
     config.deploy.entry = Some("main.py".into());
     crate::deploy::test_support::write_project_config(project.path(), &config);
     std::fs::write(project.path().join("main.py"), "import acme\n").unwrap();
@@ -134,7 +134,7 @@ fn staged_requirement_project(
     let mut config = nrz::config::ProjectConfig::default();
     config.build.output_directory = Some(output.into());
     config.deploy.runtime = Some(ApplicationRuntimeFamily::Python);
-    config.deploy.python_version = Some(minor);
+    config.deploy.python_version = Some(minor.version());
     config.deploy.entry = Some("main.py".into());
     std::fs::create_dir_all(project.path().join(output)).unwrap();
     std::fs::write(project.path().join(output).join("main.py"), "import acme\n").unwrap();
@@ -169,6 +169,28 @@ async fn target_excluded_python_requirements_publish_without_a_dependency_stage(
                     std::fs::write(project.path().join("pyproject.toml"), format!("[tool.poetry]\nname='app'\npackage-mode=false\n[tool.poetry.dependencies]\npython='*'\ncolorama={{version='*', {selectors}}}\n")).unwrap();
                     std::fs::write(project.path().join("poetry.lock"), "").unwrap();
                 }
+                if selectors == Some("python='<3.12'") {
+                    // Only an immutable target, not the raw config hint, fixes marker Python facts.
+                    let mut manifest = crate::build::manifest::generate_compute_manifest("main.py");
+                    let declaration = serde_json::from_value(serde_json::json!({
+                        "family": "PYTHON", "pythonVersion": "4.x", "entry": "main.py", "args": []
+                    }))
+                    .unwrap();
+                    super::super::apply_application_runtime_manifest(
+                        &mut manifest,
+                        Some(&declaration),
+                        Some(&minor.target()),
+                        "python",
+                    )
+                    .unwrap();
+                    let directory = project.path().join(output).join(".onreza");
+                    std::fs::create_dir_all(&directory).unwrap();
+                    std::fs::write(
+                        directory.join("manifest.json"),
+                        serde_json::to_vec(&manifest).unwrap(),
+                    )
+                    .unwrap();
+                }
                 std::fs::write(
                     project.path().join(output).join("main.py"),
                     "print('TARGET_DEPENDENCY_FREE')\n",
@@ -176,7 +198,7 @@ async fn target_excluded_python_requirements_publish_without_a_dependency_stage(
                 .unwrap();
                 let plan = crate::deploy::test_support::build_plan(&args, &command, &[])
                     .await
-                    .unwrap();
+                    .unwrap_or_else(|error| panic!("{minor:?}/{output}/{selectors:?}: {error:#}"));
                 let source = plan
                     .materialize_source_bundle(
                         true,
@@ -198,7 +220,7 @@ async fn target_excluded_python_requirements_publish_without_a_dependency_stage(
                 );
                 let launch = nrz_runtime_artifact::python_script_launch_arguments(
                     entry,
-                    minor.site_packages_root(),
+                    Some(&minor.site_packages_root()),
                     ".",
                 );
                 let execution = std::process::Command::new("python3")
@@ -217,6 +239,53 @@ async fn target_excluded_python_requirements_publish_without_a_dependency_stage(
                 );
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn code_only_python_platform_exclusions_preserve_raw_declarations() {
+    for declaration in ["2.7", "3.11.99", "4.x"] {
+        let project = tempfile::tempdir().unwrap();
+        let mut config = nrz::config::ProjectConfig::default();
+        config.build.output_directory = Some(".".into());
+        config.deploy.runtime = Some(ApplicationRuntimeFamily::Python);
+        config.deploy.python_version = Some(declaration.into());
+        config.deploy.entry = Some("main.py".into());
+        std::fs::write(project.path().join("main.py"), "print('CODE_ONLY')\n").unwrap();
+        std::fs::write(
+            project.path().join("requirements.txt"),
+            "colorama; sys_platform == 'win32'\n",
+        )
+        .unwrap();
+        crate::deploy::test_support::write_project_config(project.path(), &config);
+        let (command, args) = crate::deploy::test_support::deploy_context(
+            project.path(),
+            &config,
+            &["--skip-install", "--skip-build"],
+        );
+        let plan = crate::deploy::test_support::build_plan(&args, &command, &[])
+            .await
+            .unwrap();
+        let runtime = plan.artifact.runtime.manifest.layers[0]
+            .runtime
+            .as_ref()
+            .unwrap();
+        assert_eq!(runtime.build_runtime_version.as_deref(), Some("python"));
+        assert_eq!(
+            plan.artifact
+                .build
+                .detection
+                .metadata
+                .source_build_context
+                .as_ref()
+                .unwrap()
+                .application_runtime
+                .as_ref()
+                .unwrap()
+                .python_version
+                .as_deref(),
+            Some(declaration)
+        );
     }
 }
 

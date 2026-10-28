@@ -712,7 +712,7 @@ fn untyped_manifest_cannot_bind_a_different_frozen_primary_entry() {
         let declaration = ApplicationRuntimeDeclaration {
             family,
             python_version: (family == ApplicationRuntimeFamily::Python)
-                .then_some(PythonMinor::Python314),
+                .then_some(PythonMinor::Python314.version()),
             entry: Some(entry.into()),
             args: vec!["MODULE".into(), "selected".into()],
         };
@@ -744,7 +744,7 @@ fn typed_siblings_cannot_replace_a_declared_primary_entry() {
         let declaration = ApplicationRuntimeDeclaration {
             family,
             python_version: (family == ApplicationRuntimeFamily::Python)
-                .then_some(PythonMinor::Python314),
+                .then_some(PythonMinor::Python314.version()),
             entry: Some(entry.into()),
             args: vec![],
         };
@@ -943,7 +943,7 @@ fn freshly_rebuilt_primary_uses_admission_and_preserves_independent_siblings() {
                 .as_ref()
                 .unwrap()
                 .family,
-            python_version: minor,
+            python_version: minor.map(nrz_source_bundle::PythonMinor::version),
             entry: Some(entry.into()),
             args: vec![],
         };
@@ -1044,4 +1044,45 @@ fn fresh_runtime_only_primary_is_unique_among_independent_siblings() {
         .is_err()
     );
     assert_eq!(serde_json::to_value(&manifest).unwrap(), before);
+}
+
+#[test]
+fn code_only_typed_siblings_keep_family_only_build_facts() {
+    let mut manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version":2, "routes":[], "layers":[
+            {"name":"main","target":"COMPUTE","directory":".","entry":"main.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]}}},
+            {"name":"worker","target":"COMPUTE","directory":"worker","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]}}}
+        ]
+    })).unwrap();
+    let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+        family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
+        python_version: None,
+        entry: Some("main.js".into()),
+        args: vec![],
+    };
+    crate::deploy::apply_application_runtime_manifest(
+        &mut manifest,
+        Some(&declaration),
+        Some("node"),
+        "other",
+    )
+    .unwrap();
+    assert_eq!(
+        manifest.layers[0]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .build_runtime_version
+            .as_deref(),
+        Some("node")
+    );
+    assert_eq!(
+        manifest.layers[1]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .build_runtime_version
+            .as_deref(),
+        Some("python")
+    );
 }

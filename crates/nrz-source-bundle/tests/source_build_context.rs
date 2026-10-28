@@ -50,7 +50,7 @@ fn build_context_rejects_incomplete_unknown_and_invalid_declarations() {
     for value in [
         json!({"schemaVersion":1,"buildToolchain":{"family":"python"},"applicationRuntime":null}),
         json!({"schemaVersion":1,"buildToolchain":{"family":"GO"},"applicationRuntime":null}),
-        json!({"schemaVersion":1,"buildToolchain":{"family":"PYTHON","pythonVersion":"3.15"},"applicationRuntime":null}),
+        json!({"schemaVersion":1,"buildToolchain":{"family":"PYTHON","pythonVersion":""},"applicationRuntime":null}),
         json!({"schemaVersion":1,"buildToolchain":{"family":"PYTHON","extra":true},"applicationRuntime":null}),
         json!({"schemaVersion":1,"buildToolchain":{"family":"PYTHON"},"applicationRuntime":null,"extra":true}),
     ] {
@@ -100,5 +100,29 @@ fn build_context_rejects_incomplete_unknown_and_invalid_declarations() {
     ] {
         let context: SourceBuildContext = serde_json::from_value(json!({"schemaVersion":1,"buildToolchain":{"family":"NODE"},"applicationRuntime":{"family":"NODE","entry":entry,"args":[]}})).unwrap();
         context.validate().unwrap();
+    }
+}
+
+#[test]
+fn build_context_preserves_unlisted_python_declarations() {
+    let value = json!({
+        "schemaVersion":1,"buildToolchain":{"family":"PYTHON","pythonVersion":"3.11"},
+        "applicationRuntime":{"family":"PYTHON","pythonVersion":"3.15","args":[]}
+    });
+    let context: SourceBuildContext = serde_json::from_value(value.clone()).unwrap();
+    context.validate().unwrap();
+    assert_eq!(serde_json::to_value(context).unwrap(), value);
+}
+
+#[test]
+fn frozen_python_context_preserves_raw_version_hints() {
+    for hint in ["2.7", "3.11", "3.14.9", "4.x"] {
+        let value = json!({
+            "schemaVersion":1, "buildToolchain":{"family":"PYTHON", "pythonVersion":hint},
+            "applicationRuntime":{"family":"PYTHON", "pythonVersion":hint, "args":[]}
+        });
+        let context: SourceBuildContext = serde_json::from_value(value.clone()).unwrap();
+        context.validate().unwrap();
+        assert_eq!(serde_json::to_value(context).unwrap(), value);
     }
 }

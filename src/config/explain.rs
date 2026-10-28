@@ -11,7 +11,7 @@ impl EffectiveProjectConfig {
         );
         let build_toolchain =
             crate::detect::application_runtime::resolve_build_toolchain(&detection, &self.config)?;
-        let build_python_version = build_toolchain.resolved_python_minor();
+        let build_python_version = build_toolchain.python_version.clone();
         let selected_serving_python_version =
             crate::detect::application_runtime::resolve_serving_python_minor(
                 &detection,
@@ -23,6 +23,7 @@ impl EffectiveProjectConfig {
             .config
             .deploy
             .python_version
+            .clone()
             .or(selected_serving_python_version);
         Ok(EffectiveConfigExplanation {
             project_dir: self.project_dir.display().to_string(),
@@ -56,7 +57,7 @@ impl EffectiveProjectConfig {
                 "auto",
             ),
             build_python_version: explain_config_option(
-                build_python_version.map(nrz_source_bundle::PythonMinor::version),
+                build_python_version.as_deref(),
                 if self.config.build.python_version.is_some()
                     || self.config.deploy.python_version.is_some()
                 {
@@ -69,7 +70,7 @@ impl EffectiveProjectConfig {
             deploy_compute: explain_config_option(self.deploy_compute(), "onreza.toml", "auto"),
             deploy_entry: explain_config_option(self.deploy_entry(), "onreza.toml", "absent"),
             deploy_python_version: explain_config_option(
-                deploy_python_version.map(nrz_source_bundle::PythonMinor::version),
+                deploy_python_version.as_deref(),
                 if self.config.deploy.python_version.is_some()
                     || self.config.build.python_version.is_some()
                 {

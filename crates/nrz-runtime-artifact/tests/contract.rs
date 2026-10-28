@@ -350,3 +350,32 @@ fn modern_graph_layer_names_reject_controls_without_tightening_legacy_readers() 
     retained["runtimeLayers"][0]["layerName"] = json!("api\n");
     assert!(finalize_runtime_artifact_graph(retained, &paths).is_ok());
 }
+
+#[test]
+fn generic_launch_profiles_do_not_erase_dependency_compiler_witnesses() {
+    for (profile, family, kind, actual, unknown) in [
+        (
+            "NODE",
+            "javascript",
+            "JAVASCRIPT_NODE_MODULES",
+            "node-23.1.0",
+            "node",
+        ),
+        (
+            "CPYTHON",
+            "python",
+            "PYTHON_SITE_PACKAGES",
+            "python-3.11.9",
+            "python",
+        ),
+    ] {
+        let mut value = graph();
+        value["runtimeLayers"][0]["launch"] = json!({"profile":profile,"args":[],"cwd":"."});
+        value["dependencies"][0]["kind"] = json!(kind);
+        value["dependencies"][0]["compatibility"]["runtimeFamily"] = json!(family);
+        value["dependencies"][0]["compatibility"]["runtimeVersion"] = json!(actual);
+        assert!(finalize_runtime_artifact_graph(value.clone(), &[]).is_ok());
+        value["dependencies"][0]["compatibility"]["runtimeVersion"] = json!(unknown);
+        assert!(finalize_runtime_artifact_graph(value, &[]).is_err());
+    }
+}

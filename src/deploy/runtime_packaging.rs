@@ -35,8 +35,12 @@ pub(super) fn resolve_runtime_artifact_with_manifest_source(
     json: bool,
     manifest_source: crate::artifact::BuildManifestSource,
 ) -> anyhow::Result<RuntimeArtifact> {
-    let python_minor = selected_python_runtime_minor(detection);
     let python_runtime = has_python_runtime(&manifest, detection);
+    let python_minor = if python_runtime {
+        selected_python_runtime_minor(project_dir, Some(&manifest))?
+    } else {
+        None
+    };
     let mut javascript_dependency_closure = false;
     let javascript_dependency_owner =
         declared_javascript_dependency_owner(project_dir, &build_output_dir, &manifest, detection);
@@ -230,24 +234,42 @@ fn validate_compute_entry_ownership(
     Ok(())
 }
 
-fn selected_python_runtime_minor(
-    detection: &crate::detect::types::DetectionResult,
-) -> nrz_source_bundle::PythonMinor {
-    detection
-        .metadata
-        .source_build_context
-        .as_ref()
-        .and_then(|context| context.build_toolchain.resolved_python_minor())
-        .or_else(|| {
-            detection
-                .metadata
-                .application_runtime()
-                .filter(|runtime| {
-                    runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
-                })
-                .and_then(|runtime| runtime.python_version)
+pub(super) fn selected_python_runtime_minor(
+    project_dir: &Path,
+    manifest: Option<&build_manifest::Manifest>,
+) -> anyhow::Result<Option<nrz_source_bundle::PythonMinor>> {
+    let mut targets = manifest
+        .into_iter()
+        .flat_map(|manifest| &manifest.layers)
+        .filter_map(|layer| layer.runtime.as_ref()?.build_runtime_version.as_deref())
+        .filter_map(nrz_source_bundle::PythonMinor::from_target);
+    if let Some(first) = targets.next()
+        && targets.all(|minor| minor == first)
+    {
+        return Ok(Some(first));
+    }
+    let mut roots = std::fs::read_dir(project_dir.join(".onreza/python"))
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            nrz_source_bundle::PythonMinor::from_version(entry.file_name().to_str()?)
         })
-        .unwrap_or_default()
+        .filter(|minor| {
+            project_dir
+                .join(minor.site_packages_root())
+                .read_dir()
+                .is_ok_and(|mut entries| entries.next().is_some())
+        });
+    let root = roots.next();
+    if roots.next().is_some() {
+        return Err(output::coded_error(
+            "APPLICATION_RUNTIME_INVALID",
+            "Python dependency roots require one owning runtime layer; multiple retained Python closures are not supported",
+        ));
+    }
+    Ok(root)
 }
 
 fn has_python_runtime(
@@ -273,27 +295,33 @@ fn uses_python_dependency_materialization(
     detection: &crate::detect::types::DetectionResult,
 ) -> bool {
     use nrz_source_bundle::ApplicationRuntimeFamily as Family;
-    let installed_minor = detection
+    let python_build = detection
         .metadata
         .source_build_context
         .as_ref()
-        .and_then(|context| context.build_toolchain.resolved_python_minor());
+        .is_some_and(|context| {
+            context.build_toolchain.family == nrz_source_bundle::BuildToolchainFamily::Python
+        });
     let primary = detection.metadata.application_runtime();
     let primary_javascript =
         primary.is_some_and(|runtime| matches!(runtime.family, Family::Node | Family::Bun));
-    installed_minor.is_some() && !primary_javascript
+    python_build && !primary_javascript
         || primary.is_some_and(|runtime| runtime.family == Family::Python)
 }
 
 fn requires_authored_python_dependencies(
     project_dir: &Path,
     detection: &crate::detect::types::DetectionResult,
+    manifest: Option<&build_manifest::Manifest>,
 ) -> anyhow::Result<bool> {
-    Ok(uses_python_dependency_materialization(detection)
-        && crate::detect::python::requires_dependency_stage_for_target(
-            &crate::detect::fs::LocalFs::new(project_dir),
-            selected_python_runtime_minor(detection),
-        )?)
+    if !uses_python_dependency_materialization(detection) {
+        return Ok(false);
+    }
+    let fs = crate::detect::fs::LocalFs::new(project_dir);
+    crate::detect::python::requires_dependency_stage_for_runtime(
+        &fs,
+        selected_python_runtime_minor(project_dir, manifest)?,
+    )
 }
 
 /// Required dependencies must survive the plan's actual scan and retention.
@@ -305,25 +333,30 @@ pub(super) fn requires_retained_python_runtime_dependencies(
 ) -> anyhow::Result<bool> {
     Ok(manifest_has_compute_layer(&artifact.manifest)
         && has_python_runtime(&artifact.manifest, detection)
-        && requires_authored_python_dependencies(project_dir, detection)?)
+        && requires_authored_python_dependencies(project_dir, detection, Some(&artifact.manifest))?)
 }
 
 pub(super) fn validate_retained_python_runtime_dependencies(
     required: bool,
     artifact: &RuntimeArtifact,
     files: &crate::artifact::ArtifactFileCollection,
-    detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<()> {
     if !required {
         return Ok(());
     }
-    let minor = selected_python_runtime_minor(detection);
+    let minor = selected_python_runtime_minor(&artifact.root_dir, Some(&artifact.manifest))?;
+    let minor = minor.ok_or_else(|| {
+        output::coded_error(
+            "MISSING_RUNTIME_DEPENDENCIES",
+            "required Python dependencies have no retained owning root",
+        )
+    })?;
     let dependency_root = minor.site_packages_root();
     let retained = artifact
         .scan
-        .source_layer_match(&artifact.manifest, dependency_root)
+        .source_layer_match(&artifact.manifest, &dependency_root)
         .is_some_and(|owner| {
-            has_retained_python_dependency_file(dependency_root, &owner.name, files)
+            has_retained_python_dependency_file(&dependency_root, &owner.name, files)
         });
     if !retained {
         return Err(output::coded_error(
@@ -366,38 +399,50 @@ fn has_retained_python_dependency_file(
     false
 }
 
-/// The automatic installer owns one Python minor. A typed serving layer cannot
-/// replace that materialization ABI, including when the primary serves STATIC.
+/// Retained dependency roots must agree with their actual owning layer target.
 fn validate_python_layer_dependencies(
     workspace_root_dir: &Path,
     project_dir: &Path,
     artifact: &RuntimeArtifact,
     detection: &crate::detect::types::DetectionResult,
-    minor: nrz_source_bundle::PythonMinor,
+    minor: Option<nrz_source_bundle::PythonMinor>,
 ) -> anyhow::Result<bool> {
     use nrz_source_bundle::{ApplicationRuntimeFamily as Family, PythonMinor};
     let manifest = &artifact.manifest;
-    let installed_minor = detection
-        .metadata
-        .source_build_context
-        .as_ref()
-        .and_then(|context| context.build_toolchain.resolved_python_minor());
     let primary = detection.metadata.application_runtime();
-    let authored_dependencies = requires_authored_python_dependencies(project_dir, detection)?;
-    let staged = project_dir
-        .join(minor.site_packages_root())
-        .read_dir()
-        .is_ok_and(|mut entries| entries.next().is_some());
+    if let Some(runtime) = primary.filter(|runtime| {
+        runtime.family == Family::Python
+            && runtime.entry.as_deref()
+                == Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
+    }) {
+        super::python_launch::validate_python_server_dependencies(
+            project_dir,
+            &runtime.args,
+            minor,
+        )?;
+    }
+
+    let authored_dependencies =
+        requires_authored_python_dependencies(project_dir, detection, Some(&artifact.manifest))?;
+    let staged = minor.is_some_and(|minor| {
+        project_dir
+            .join(minor.site_packages_root())
+            .read_dir()
+            .is_ok_and(|mut entries| entries.next().is_some())
+    });
     let scan = &artifact.scan;
     // Without a primary, an unambiguous typed owner can explicitly claim a
     // retained serving tree. A primary's code-only siblings do not claim stale trees.
     if primary.is_none() {
-        for other_minor in PythonMinor::ALL
-            .into_iter()
-            .filter(|candidate| *candidate != minor)
+        for other_minor in manifest
+            .layers
+            .iter()
+            .filter_map(|layer| layer.runtime.as_ref()?.build_runtime_version.as_deref())
+            .filter_map(PythonMinor::from_target)
+            .filter(|candidate| Some(*candidate) != minor)
         {
             let claimed = scan
-                .source_layer_match(manifest, other_minor.site_packages_root())
+                .source_layer_match(manifest, &other_minor.site_packages_root())
                 .is_some_and(|layer| {
                     layer.target == build_manifest::LayerTarget::Compute
                         && layer.runtime.as_ref().is_some_and(|runtime| {
@@ -405,8 +450,11 @@ fn validate_python_layer_dependencies(
                                 .application_runtime
                                 .as_ref()
                                 .is_some_and(|intent| intent.family == Family::Python)
-                                && runtime.build_runtime_version.as_deref()
-                                    == Some(other_minor.target())
+                                && runtime
+                                    .build_runtime_version
+                                    .as_deref()
+                                    .and_then(PythonMinor::from_target)
+                                    == Some(other_minor)
                         })
                 });
             if claimed
@@ -417,12 +465,13 @@ fn validate_python_layer_dependencies(
             {
                 return Err(output::coded_error(
                     "APPLICATION_RUNTIME_INVALID",
-                    "Python runtime dependencies require matching build and serving Python minors; independent toolchains are supported for code-only output",
+                    "Python dependency roots require one owning runtime layer; multiple retained Python closures are not supported",
                 ));
             }
         }
     }
-    let staged_owner = scan.source_layer_match(manifest, minor.site_packages_root());
+    let staged_owner =
+        minor.and_then(|minor| scan.source_layer_match(manifest, &minor.site_packages_root()));
     let staged_runtime_dependencies = staged
         && (uses_python_dependency_materialization(detection)
             || staged_owner
@@ -431,7 +480,13 @@ fn validate_python_layer_dependencies(
                 .is_some_and(|runtime| runtime.family == Family::Python));
     let dependencies = authored_dependencies || staged_runtime_dependencies;
     if dependencies {
-        let owner = scan.source_layer_match(manifest, minor.site_packages_root());
+        let minor = minor.ok_or_else(|| {
+            output::coded_error(
+                "MISSING_RUNTIME_DEPENDENCIES",
+                "required Python dependencies have no retained owning root",
+            )
+        })?;
+        let owner = scan.source_layer_match(manifest, &minor.site_packages_root());
         let compatible = owner.is_some_and(|layer| {
             let runtime = layer.runtime.as_ref();
             let primary = detection.metadata.application_runtime();
@@ -443,28 +498,24 @@ fn validate_python_layer_dependencies(
                     == Some(Family::Python)
                 && runtime
                     .and_then(|runtime| runtime.build_runtime_version.as_deref())
-                    .or_else(|| {
-                        primary
-                            .and_then(|runtime| runtime.python_version)
-                            .map(PythonMinor::target)
+                    .is_some_and(|target| {
+                        target == "python" || PythonMinor::from_target(target) == Some(minor)
                     })
-                    == Some(minor.target())
         });
-        if !compatible
-            || detection.metadata.source_build_context.is_some() && installed_minor != Some(minor)
-        {
+        if !compatible {
             return Err(output::coded_error(
                 "APPLICATION_RUNTIME_INVALID",
                 format!(
-                    "Python dependency root '{}' conflicts with selected installer {} or owning layer '{}'; runtime dependency owners require matching build and serving Python minors",
+                    "Python dependency root '{}' conflicts with the actual build target of owning layer '{}'",
                     minor.site_packages_root(),
-                    minor.version(),
                     owner.map_or("<none>", |layer| layer.name.as_str())
                 ),
             ));
         }
     }
-    if authored_dependencies && !project_dir.join(minor.site_packages_root()).is_dir() {
+    if authored_dependencies
+        && !minor.is_some_and(|minor| project_dir.join(minor.site_packages_root()).is_dir())
+    {
         return Err(output::coded_error(
             "MISSING_RUNTIME_DEPENDENCIES",
             "Python PROCESS runtime requires installed dependencies. Run the install step before deploy, or remove --skip-install.",
@@ -683,7 +734,7 @@ fn resolve_python_runtime_artifact(
     build_output_dir: PathBuf,
     manifest: build_manifest::Manifest,
     json: bool,
-    minor: nrz_source_bundle::PythonMinor,
+    minor: Option<nrz_source_bundle::PythonMinor>,
     project_owned_bootstrap: bool,
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<RuntimeArtifact> {
@@ -727,7 +778,10 @@ fn resolve_python_runtime_artifact(
     output::status(
         json,
         "~",
-        format!("Runtime artifact: CPython {} project root", minor.version()),
+        minor.map_or_else(
+            || "Runtime artifact: Python project root".to_owned(),
+            |minor| format!("Runtime artifact: CPython {} project root", minor.version()),
+        ),
         output::Phase::Deploy,
     );
     Ok(RuntimeArtifact {

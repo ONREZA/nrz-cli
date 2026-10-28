@@ -68,7 +68,9 @@ fn rooted_python_src_package_discovery_controls_backend_pruning() {
         assert_eq!(plan.install_project, packaged);
         let files = scan_runtime_artifact_rooted(
             &owner,
-            &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+            &RuntimeArtifactScan::PythonRuntimeRoot(
+                Some(nrz_source_bundle::PythonMinor::default()),
+            ),
         )
         .unwrap();
         assert_eq!(
@@ -385,7 +387,7 @@ fn published_python_bundle_excludes_installer_staging_and_retains_installed_asse
         let detection =
             crate::detect::detect_with_framework_override(project.path(), Some("python"));
         for scan in [
-            RuntimeArtifactScan::PythonRuntimeRoot(minor),
+            RuntimeArtifactScan::PythonRuntimeRoot(Some(minor)),
             RuntimeArtifactScan::All,
             RuntimeArtifactScan::NodeRuntimeRoot,
         ] {
@@ -470,7 +472,7 @@ fn installer_staging_symlinks_do_not_block_python_runtime_scan() {
     )
     .unwrap();
     for scan in [
-        RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+        RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
         RuntimeArtifactScan::All,
     ] {
         let files = scan_runtime_artifact(project.path(), &scan)
@@ -582,7 +584,7 @@ fn selected_python_output_does_not_read_unrelated_cache_directories() {
         );
         let files = scan_python_root(
             &nrz_runtime_artifact::ArtifactRoot::open(root).unwrap(),
-            nrz_source_bundle::PythonMinor::default(),
+            Some(nrz_source_bundle::PythonMinor::default()),
             Some(std::path::Path::new("dist")),
         )
         .expect("unselected caches must be pruned before traversal");

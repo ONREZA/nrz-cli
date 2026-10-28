@@ -14,7 +14,7 @@ use crate::{
 };
 
 const DEPENDENCY_FILE_ROLE: &str = "dependency";
-pub const PYTHON_314_SITE_PACKAGES_ROOT: &str = crate::PythonMinor::Python314.site_packages_root();
+pub const PYTHON_314_SITE_PACKAGES_ROOT: &str = ".onreza/python/3.14/site-packages";
 #[cfg(unix)]
 const FILE_MODE: u32 = 0o644;
 #[cfg(unix)]

@@ -10,7 +10,9 @@ mod generated;
 pub mod application_package_v1;
 pub mod artifact_json_v1;
 pub mod runtime_artifact_graph_v3;
+mod runtime_profile;
 pub mod source_bundle_v2;
+pub use runtime_profile::RuntimeProfile;
 
 #[cfg(test)]
 mod source_bundle_v2_tests;
@@ -39,7 +41,6 @@ pub use runtime_artifact_graph::{
     OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraph as RuntimeArtifactGraphV2Wire,
     OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItem as RuntimeLayerWire,
     OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunch as RuntimeLaunchWire,
-    OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile as RuntimeProfile,
     OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol as RuntimeReadinessProtocol,
 };
 pub use runtime_artifact_graph_v3::RuntimeArtifactGraphV3 as RuntimeArtifactGraphV3Wire;

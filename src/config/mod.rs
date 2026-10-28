@@ -164,7 +164,10 @@ pub struct BuildSection {
         serialize_with = "serialize_build_toolchain"
     )]
     pub toolchain: Option<nrz_source_bundle::BuildToolchainFamily>,
-    pub python_version: Option<nrz_source_bundle::PythonMinor>,
+    #[serde(
+        deserialize_with = "nrz_source_bundle::python::deserialize_python_version_declaration"
+    )]
+    pub python_version: Option<String>,
     pub output_dirs: Option<Vec<String>>,
     pub command: Option<String>,
     pub install_command: Option<String>,
@@ -175,8 +178,11 @@ pub struct BuildSection {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DeploySection {
-    /// Selected supported CPython minor; absent selects the platform default.
-    pub python_version: Option<nrz_source_bundle::PythonMinor>,
+    /// Authored runtime hint, independent of the available compiler binding.
+    #[serde(
+        deserialize_with = "nrz_source_bundle::python::deserialize_python_version_declaration"
+    )]
+    pub python_version: Option<String>,
     /// Application launcher, independent of install/build commands.
     #[serde(serialize_with = "serialize_runtime_family")]
     pub runtime: Option<nrz_source_bundle::ApplicationRuntimeFamily>,
@@ -205,6 +211,7 @@ impl BuildSection {
     pub fn selected_toolchain_family(&self) -> Option<nrz_source_bundle::BuildToolchainFamily> {
         self.toolchain.or_else(|| {
             self.python_version
+                .as_ref()
                 .map(|_| nrz_source_bundle::BuildToolchainFamily::Python)
         })
     }
@@ -1012,9 +1019,8 @@ impl EffectiveProjectConfig {
     }
 
     pub fn bind_admitted_node_version(&mut self, node_version: &str) -> anyhow::Result<()> {
-        if !matches!(node_version, "NODE_22" | "NODE_24" | "NODE_26") {
-            anyhow::bail!("admitted Node version is unsupported");
-        }
+        nrz_source_bundle::validate_runtime_version_declaration(node_version)
+            .map_err(anyhow::Error::msg)?;
         self.node_version = Some(node_version.to_string());
         Ok(())
     }

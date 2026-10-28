@@ -683,9 +683,12 @@ fn edge_build_handoff_preserves_python_and_native_serving_under_node_compiler() 
         .map(|minor| (Some(minor), minor.target()))
         .chain([(
             Some(nrz_source_bundle::PythonMinor::Python312),
-            "python-3.14",
+            "python-3.14".to_string(),
         )])
-        .chain([(None, nrz_runtime_artifact::NATIVE_EXECUTION_TARGET)]);
+        .chain([(
+            None,
+            nrz_runtime_artifact::NATIVE_EXECUTION_TARGET.to_string(),
+        )]);
     for (minor, target) in targets {
         let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
         let (family, entry, mut declaration) = if let Some(minor) = minor {
@@ -730,7 +733,7 @@ fn edge_build_handoff_preserves_python_and_native_serving_under_node_compiler() 
             output_dir.path(),
             &api_url,
             deployment_id,
-            target,
+            &target,
         );
         assert_eq!(manifest.layers.len(), 1);
         let layer = &manifest.layers[0];
@@ -748,12 +751,12 @@ fn edge_build_handoff_preserves_python_and_native_serving_under_node_compiler() 
         declaration.as_object_mut().unwrap().remove("pythonVersion");
         assert_eq!(runtime["applicationRuntime"], declaration);
         assert_eq!(
-            nrz_runtime_artifact::source_layer_launch_for_target(Some(runtime), Some(target))
+            nrz_runtime_artifact::source_layer_launch_for_target(Some(runtime), Some(&target))
                 .unwrap()
                 .profile
                 .to_string(),
-            nrz_source_bundle::PythonMinor::from_target(target)
-                .map_or("EXECUTABLE", |minor| minor.profile_name())
+            nrz_source_bundle::PythonMinor::from_target(&target)
+                .map_or_else(|| "EXECUTABLE".to_string(), |minor| minor.profile_name())
         );
         assert!(
             nrz_runtime_artifact::source_layer_launch_for_target(Some(runtime), Some("node-24"))

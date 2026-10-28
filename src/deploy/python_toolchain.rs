@@ -124,6 +124,80 @@ pub(super) async fn resolve_for(mode: PythonInstallMode) -> anyhow::Result<PathB
     }
 }
 
+#[derive(Debug)]
+pub(super) struct PythonInterpreter {
+    pub(super) path: PathBuf,
+    pub(super) minor: PythonMinor,
+    pub(super) version: String,
+}
+
+impl PythonInterpreter {
+    pub(super) fn matches_build_target(&self, target: &str) -> bool {
+        let Some(expected) = target.strip_prefix("python-") else {
+            return false;
+        };
+        if expected.split('.').count() == 3 {
+            expected == self.version
+        } else {
+            PythonMinor::from_target(target) == Some(self.minor)
+        }
+    }
+}
+
+pub(super) async fn available_interpreter(
+    environment: &[(String, String)],
+) -> anyhow::Result<PythonInterpreter> {
+    let uv = resolve_for(PythonInstallMode::ManagedLocal).await?;
+    let command = PythonInstallCommand {
+        program: uv.clone(),
+        arguments: [
+            "python",
+            "find",
+            "--no-project",
+            "--no-config",
+            "--no-python-downloads",
+        ]
+        .map(OsString::from)
+        .to_vec(),
+        display: "select available Python compiler".into(),
+        portable_wheel_directory: None,
+    };
+    let mut process: tokio::process::Command = command.process(&uv, environment).into();
+    let output = process.kill_on_drop(true).output().await?;
+    if !output.status.success() {
+        bail!(
+            "cannot find available Python compiler: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let path = String::from_utf8(output.stdout)?;
+    probe_interpreter(Path::new(path.trim())).await
+}
+
+pub(super) async fn probe_interpreter(interpreter: &Path) -> anyhow::Result<PythonInterpreter> {
+    let path = interpreter
+        .canonicalize()
+        .context("selected Python compiler is unavailable")?;
+    let output = tokio::process::Command::new(&path)
+        .args(["-I", "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])) if sys.implementation.name == 'cpython' else '')"])
+        .kill_on_drop(true).output().await?;
+    let version = String::from_utf8(output.stdout)?;
+    let mut parts = version.trim().rsplitn(2, '.');
+    let patch = parts.next().unwrap_or_default();
+    let minor = parts.next().and_then(PythonMinor::from_version);
+    if !output.status.success()
+        || patch.is_empty()
+        || !patch.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        bail!("selected Python compiler must report its CPython version");
+    }
+    Ok(PythonInterpreter {
+        path,
+        minor: minor.context("selected Python compiler must report a canonical CPython version")?,
+        version: version.trim().to_owned(),
+    })
+}
+
 /// Select the actual compiler and make the installed build tools visible to
 /// authored commands. Serving dependencies keep their independent ABI witness.
 pub(super) async fn build_environment(
@@ -131,12 +205,14 @@ pub(super) async fn build_environment(
     mode: PythonInstallMode,
     minor: PythonMinor,
     environment: &[(String, String)],
+    selected_interpreter: Option<&Path>,
 ) -> anyhow::Result<Vec<(String, String)>> {
     build_environment_for_host(
         project_dir,
         mode,
         minor,
         environment,
+        selected_interpreter,
         (std::env::consts::OS, std::env::consts::ARCH),
         if mode == PythonInstallMode::ManagedLocal {
             host_glibc_version()
@@ -152,69 +228,19 @@ async fn build_environment_for_host(
     mode: PythonInstallMode,
     minor: PythonMinor,
     environment: &[(String, String)],
+    selected_interpreter: Option<&Path>,
     host: (&str, &str),
     glibc_version: Option<(u32, u32)>,
 ) -> anyhow::Result<Vec<(String, String)>> {
     validate_local_build_dependency_host_with_glibc(project_dir, mode, minor, host, glibc_version)?;
-    let interpreter = match mode {
-        PythonInstallMode::PinnedPlatform => PathBuf::from(minor.platform_interpreter()),
-        PythonInstallMode::ManagedLocal => {
-            let uv = resolve_for(mode).await?;
-            for arguments in [
-                vec![
-                    "python",
-                    "install",
-                    "--no-bin",
-                    "--no-registry",
-                    "--no-config",
-                    minor.exact_version(),
-                ],
-                vec![
-                    "python",
-                    "find",
-                    "--no-project",
-                    "--no-config",
-                    "--managed-python",
-                    minor.exact_version(),
-                ],
-            ] {
-                let command = PythonInstallCommand {
-                    program: uv.clone(),
-                    arguments: arguments.into_iter().map(OsString::from).collect(),
-                    display: "select managed Python build compiler".into(),
-                    portable_wheel_directory: None,
-                };
-                let mut process: tokio::process::Command = command.process(&uv, environment).into();
-                let output = process
-                    .current_dir(project_dir)
-                    .kill_on_drop(true)
-                    .output()
-                    .await?;
-                if !output.status.success() {
-                    bail!(
-                        "cannot select pinned Python build compiler: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    );
-                }
-                if command
-                    .arguments
-                    .get(1)
-                    .is_some_and(|argument| argument == "find")
-                {
-                    let path = String::from_utf8(output.stdout)?.trim().to_string();
-                    return build_environment_for_interpreter(
-                        project_dir,
-                        minor,
-                        Path::new(&path),
-                        environment,
-                    )
-                    .await;
-                }
-            }
-            unreachable!("managed interpreter selection returns its path")
+    let interpreter = match selected_interpreter {
+        Some(path) => path.to_owned(),
+        None if mode == PythonInstallMode::PinnedPlatform => {
+            PathBuf::from(minor.platform_interpreter())
         }
+        None => available_interpreter(environment).await?.path,
     };
-    build_environment_for_interpreter(project_dir, minor, &interpreter, environment).await
+    build_environment_for_interpreter(project_dir, mode, minor, &interpreter, environment).await
 }
 
 #[cfg(test)]
@@ -546,24 +572,20 @@ fn is_python_compute_file(
 
 async fn build_environment_for_interpreter(
     project_dir: &Path,
+    mode: PythonInstallMode,
     minor: PythonMinor,
     interpreter: &Path,
     environment: &[(String, String)],
 ) -> anyhow::Result<Vec<(String, String)>> {
-    let interpreter = interpreter
-        .canonicalize()
-        .context("selected Python compiler is unavailable")?;
-    let mut probe = tokio::process::Command::new(&interpreter);
-    let output = probe.args(["-I", "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])) if sys.implementation.name == 'cpython' else '')"])
-        .kill_on_drop(true).output().await?;
-    if !output.status.success()
-        || String::from_utf8_lossy(&output.stdout).trim() != minor.exact_version()
-    {
+    let selected = probe_interpreter(interpreter).await?;
+    if mode == PythonInstallMode::PinnedPlatform && selected.minor != minor {
         bail!(
-            "Python build compiler does not match selected CPython {}",
-            minor.exact_version()
+            "actual Python compiler {} differs from admitted compiler {}",
+            selected.minor.version(),
+            minor.version()
         );
     }
+    let interpreter = selected.path;
     let dependency_root = project_dir.join(minor.site_packages_root());
     let startup = materialize_python_build_startup(project_dir, &dependency_root)?;
     let inherited_path = environment
@@ -707,6 +729,7 @@ pub(super) fn install_commands(
     host_os: &str,
     host_arch: &str,
     minor: PythonMinor,
+    selected_interpreter: Option<&Path>,
 ) -> anyhow::Result<Vec<PythonInstallCommand>> {
     use crate::detect::python::{PythonDependencyKind, dependency_plan};
     let Some(plan) = dependency_plan(&crate::detect::fs::LocalFs::new(project_dir))? else {
@@ -726,12 +749,17 @@ pub(super) fn install_commands(
         ensure_python_output_path(project_dir, &project_dir.join(PROJECT_WHEELS))?;
     }
     let mut commands = Vec::new();
-    let exact_version = minor.exact_version();
     if mode == PythonInstallMode::PinnedPlatform {
         commands.push(PythonInstallCommand {
-            program: PathBuf::from(minor.platform_interpreter()),
-            arguments: ["-I", "-c", "import sys; expected = sys.argv[1]; actual = '.'.join(map(str, sys.version_info[:3])); sys.exit(0 if actual == expected and sys.implementation.name == 'cpython' else 'frozen CPython differs from selected exact patch: ' + actual)", exact_version].map(OsString::from).to_vec(),
-            display: format!("verify frozen CPython {exact_version}"),
+            program: selected_interpreter.map(Path::to_owned)
+                .unwrap_or_else(|| PathBuf::from(minor.platform_interpreter())),
+            arguments: [
+                OsString::from("-I"),
+                OsString::from("-c"),
+                OsString::from("import sys; actual = '.'.join(map(str, sys.version_info[:2])); expected = sys.argv[1]; sys.exit(0 if sys.implementation.name == 'cpython' and actual == expected else 'actual CPython minor differs from admitted compiler: ' + actual)"),
+                OsString::from(minor.version()),
+            ].to_vec(),
+            display: format!("verify admitted CPython compiler {}", minor.version()),
             portable_wheel_directory: None,
         });
     }
@@ -745,12 +773,12 @@ pub(super) fn install_commands(
         let (package, script) = if poetry_syntax {
             (
                 format!("poetry=={}", python_toolchain_versions().poetry),
-                "from poetry.core.constraints.version import parse_constraint, Version; import sys; version = sys.argv[2]; supported = parse_constraint(sys.argv[1]).allows(Version.parse(version)); sys.exit(0 if supported else 'requires-python excludes selected CPython ' + version)",
+                "from poetry.core.constraints.version import parse_constraint, Version; import subprocess, sys; version = subprocess.check_output([sys.argv[2], '-I', '-c', \"import sys; print('.'.join(map(str, sys.version_info[:3])))\"], text=True).strip(); supported = parse_constraint(sys.argv[1]).allows(Version.parse(version)); sys.exit(0 if supported else 'requires-python excludes selected CPython ' + version)",
             )
         } else {
             (
                 format!("packaging=={}", python_toolchain_versions().packaging),
-                "from packaging.specifiers import SpecifierSet; import sys; version = sys.argv[2]; supported = SpecifierSet(sys.argv[1]).contains(version); sys.exit(0 if supported else 'requires-python excludes selected CPython ' + version)",
+                "from packaging.specifiers import SpecifierSet; import subprocess, sys; version = subprocess.check_output([sys.argv[2], '-I', '-c', \"import sys; print('.'.join(map(str, sys.version_info[:3])))\"], text=True).strip(); supported = SpecifierSet(sys.argv[1]).contains(version); sys.exit(0 if supported else 'requires-python excludes selected CPython ' + version)",
             )
         };
         let mut validation = python_tool_command(
@@ -761,7 +789,16 @@ pub(super) fn install_commands(
             constraint,
             "validate requires-python",
         );
-        validation.arguments.push(OsString::from(&exact_version));
+        validation.arguments.push(
+            selected_interpreter
+                .map(|path| path.as_os_str().to_owned())
+                .unwrap_or_else(|| match mode {
+                    PythonInstallMode::PinnedPlatform => {
+                        OsString::from(minor.platform_interpreter())
+                    }
+                    PythonInstallMode::ManagedLocal => OsString::from("python3"),
+                }),
+        );
         commands.push(validation);
     }
     let requirements = match plan.kind {
@@ -818,6 +855,7 @@ pub(super) fn install_commands(
             commands.push(install_command(
                 "setup.py", mode, host_os, host_arch, minor,
             )?);
+            bind_selected_interpreter(&mut commands, selected_interpreter);
             return Ok(commands);
         }
     };
@@ -848,6 +886,7 @@ pub(super) fn install_commands(
                 minor.version()
             );
             commands.push(project);
+            bind_selected_interpreter(&mut commands, selected_interpreter);
             return Ok(commands);
         }
         let name = plan.project_name.as_deref().ok_or_else(|| {
@@ -893,6 +932,7 @@ pub(super) fn install_commands(
         }
         commands.push(install);
     }
+    bind_selected_interpreter(&mut commands, selected_interpreter);
     Ok(commands)
 }
 
@@ -925,14 +965,29 @@ pub(super) fn ensure_python_directory(project_dir: &Path, directory: &Path) -> a
     ensure_python_output_path(project_dir, directory)
 }
 
+fn bind_selected_interpreter(commands: &mut [PythonInstallCommand], interpreter: Option<&Path>) {
+    let Some(interpreter) = interpreter else {
+        return;
+    };
+    for command in commands {
+        if let Some(index) = command
+            .arguments
+            .iter()
+            .position(|argument| argument == "--python")
+        {
+            command.arguments[index + 1] = interpreter.as_os_str().to_owned();
+        }
+    }
+}
+
 pub(super) fn python_arguments(mode: PythonInstallMode, minor: PythonMinor) -> Vec<OsString> {
     match mode {
-        PythonInstallMode::ManagedLocal => ["--python", minor.exact_version(), "--managed-python"]
+        PythonInstallMode::ManagedLocal => ["--python", "python3", "--no-python-downloads"]
             .map(OsString::from)
             .to_vec(),
         PythonInstallMode::PinnedPlatform => [
             "--python",
-            minor.platform_interpreter(),
+            &minor.platform_interpreter(),
             "--no-managed-python",
             "--no-python-downloads",
         ]
@@ -949,7 +1004,7 @@ fn pip_arguments(mode: PythonInstallMode, minor: PythonMinor) -> Vec<OsString> {
             "--link-mode",
             "copy",
             "--target",
-            minor.site_packages_root(),
+            &minor.site_packages_root(),
         ]
         .map(OsString::from),
     );

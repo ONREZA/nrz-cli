@@ -84,10 +84,13 @@ fn declarations_and_intents_admit_only_compatible_runtime_targets() {
                     matches!(target, None | Some("bun-0.8.0" | "bun-1.4.2" | "bun-2.0.0"))
                 }
                 ApplicationRuntimeFamily::Node => {
-                    matches!(target, Some("node-22" | "node-24" | "node-26"))
+                    matches!(target, Some("node-22" | "node-24" | "node-26" | "node-23"))
                 }
                 ApplicationRuntimeFamily::Python => {
-                    matches!(target, Some("python-3.12" | "python-3.13" | "python-3.14"))
+                    matches!(
+                        target,
+                        Some("python-3.12" | "python-3.13" | "python-3.14" | "python-3.15")
+                    )
                 }
                 ApplicationRuntimeFamily::Executable => target == Some("native-linux-x86_64-glibc"),
             };

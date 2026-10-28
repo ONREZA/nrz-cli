@@ -9,6 +9,31 @@ fn node_command_project(package_json: &str, lockfile: Option<&str>) -> tempfile:
     dir
 }
 
+async fn run_python_install_fixture(
+    project_dir: &std::path::Path,
+    settings: &nrz::config::ProjectBuildSettings,
+    platform_runner: bool,
+) -> nrz::config::EffectiveProjectConfig {
+    let mut effective = effective_config(project_dir, nrz::config::ProjectConfig::default());
+    if platform_runner {
+        effective.apply_platform_runner_settings(settings);
+    } else {
+        effective.apply_server_settings(Some(settings));
+    }
+    run_install_step(
+        project_dir,
+        true,
+        &effective,
+        &[],
+        None,
+        platform_runner,
+        None,
+    )
+    .await
+    .unwrap();
+    effective
+}
+
 fn prepared_python_project() -> (tempfile::TempDir, PathBuf) {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
@@ -311,7 +336,7 @@ async fn recursive_deploy_install_commands_are_classified_as_invalid_config() {
         ),
     );
 
-    let error = run_install_step(dir.path(), true, &effective, &[], None, false)
+    let error = run_install_step(dir.path(), true, &effective, &[], None, false, None)
         .await
         .expect_err("recursive deploy must be rejected before the install child starts");
 
@@ -608,47 +633,31 @@ fn install_command_user_source_used_without_package_json() {
 }
 
 #[test]
-fn install_command_python_requirements_targets_versioned_site_packages() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
-    fs::write(dir.path().join("requirements.txt"), "orjson==3.11.3\n").unwrap();
-    let effective = effective_with_server_settings(
-        dir.path(),
-        nrz::config::ProjectConfig::default(),
-        server_install_settings(None, None),
-    );
-
-    let result = resolve_install_command(dir.path(), &effective).unwrap();
-
-    assert!(result.starts_with("python3.14 -m pip install"));
-    assert!(result.contains("--target .onreza/python/3.14/site-packages"));
-    assert!(result.ends_with("--requirement requirements.txt"));
+fn install_command_python_requirements_preserves_the_manifest_recipe() {
+    for javascript_metadata in [false, true] {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
+        fs::write(dir.path().join("requirements.txt"), "orjson==3.11.3\n").unwrap();
+        if javascript_metadata {
+            fs::write(
+                dir.path().join("package.json"),
+                r#"{"scripts":{"build":"vite build"}}"#,
+            )
+            .unwrap();
+        }
+        let effective = effective_with_server_settings(
+            dir.path(),
+            nrz::config::ProjectConfig::default(),
+            server_install_settings(None, None),
+        );
+        let result = resolve_install_command(dir.path(), &effective).unwrap();
+        assert!(result.starts_with("python3 -m pip install"));
+        assert!(result.ends_with("--requirement requirements.txt"));
+    }
 }
 
 #[test]
-fn install_command_python_is_not_replaced_by_javascript_metadata() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
-    fs::write(dir.path().join("requirements.txt"), "orjson==3.11.3\n").unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    let effective = effective_with_server_settings(
-        dir.path(),
-        nrz::config::ProjectConfig::default(),
-        server_install_settings(None, None),
-    );
-
-    let result = resolve_install_command(dir.path(), &effective).unwrap();
-
-    assert!(result.starts_with("python3.14 -m pip install"));
-    assert!(result.ends_with("--requirement requirements.txt"));
-}
-
-#[test]
-fn configured_python_non_conventional_entry_uses_versioned_install_target() {
+fn configured_python_non_conventional_entry_uses_the_python_recipe() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("run.py"), "print('ready')").unwrap();
     fs::write(dir.path().join("pyproject.toml"), "[project]\nname='app'").unwrap();
@@ -658,8 +667,7 @@ fn configured_python_non_conventional_entry_uses_versioned_install_target() {
 
     let result = resolve_install_command(dir.path(), &effective).unwrap();
 
-    assert!(result.starts_with("python3.14 -m pip install"));
-    assert!(result.contains("--target .onreza/python/3.14/site-packages"));
+    assert!(result.starts_with("python3 -m pip install"));
     assert!(result.ends_with(" ."));
 }
 
@@ -678,7 +686,7 @@ async fn python_install_step_ignores_retained_shell_command_without_manifest() {
         Some(nrz::config::BuildSettingSource::Preset),
     ));
 
-    run_install_step(dir.path(), true, &effective, &[], None, true)
+    run_install_step(dir.path(), true, &effective, &[], None, true, None)
         .await
         .unwrap();
 
@@ -697,15 +705,7 @@ async fn python_install_step_preserves_authored_command_and_dependencies() {
             Some("echo authored > installed.txt"),
             Some(nrz::config::BuildSettingSource::User),
         );
-        let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
-        if platform_runner {
-            effective.apply_platform_runner_settings(&settings);
-        } else {
-            effective.apply_server_settings(Some(&settings));
-        }
-        run_install_step(dir.path(), true, &effective, &[], None, platform_runner)
-            .await
-            .unwrap();
+        run_python_install_fixture(dir.path(), &settings, platform_runner).await;
         assert_eq!(
             fs::read_to_string(dir.path().join("installed.txt"))
                 .unwrap()
@@ -724,15 +724,7 @@ async fn python_install_step_user_absence_preserves_prepared_dependencies() {
     for platform_runner in [false, true] {
         let (dir, prepared) = prepared_python_project();
         let settings = server_install_settings(None, Some(nrz::config::BuildSettingSource::User));
-        let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
-        if platform_runner {
-            effective.apply_platform_runner_settings(&settings);
-        } else {
-            effective.apply_server_settings(Some(&settings));
-        }
-        run_install_step(dir.path(), true, &effective, &[], None, platform_runner)
-            .await
-            .unwrap();
+        let effective = run_python_install_fixture(dir.path(), &settings, platform_runner).await;
         assert!(
             prepared.exists(),
             "explicit install absence must not clean prepared dependencies"

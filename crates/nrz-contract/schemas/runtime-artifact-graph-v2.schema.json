@@ -228,17 +228,8 @@
                 "type": "object",
                 "properties": {
                   "profile": {
-                    "enum": [
-                      "BUN",
-                      "NODE_22",
-                      "NODE_24",
-                      "NODE_26",
-                      "CPYTHON_3_12",
-                      "CPYTHON_3_13",
-                      "CPYTHON_3_14",
-                      "EXECUTABLE"
-                    ],
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^(?:BUN|EXECUTABLE|NODE|CPYTHON|NODE_(?:0|[1-9][0-9]{0,8})|CPYTHON_(?:0|[1-9][0-9]{0,8})_(?:0|[1-9][0-9]{0,8}))$"
                   },
                   "args": {
                     "type": "array",
