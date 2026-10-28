@@ -412,17 +412,13 @@ pub(crate) async fn validate_application_runtime_before_build(
     };
     if execute_tools
         && (context.build_toolchain.family == BuildToolchainFamily::Python
-            || context
-                .application_runtime
-                .as_ref()
-                .is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Python))
+            || !platform_runner
+                && context
+                    .application_runtime
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Python))
     {
-        let mode = if platform_runner {
-            super::python_toolchain::PythonInstallMode::PinnedPlatform
-        } else {
-            super::python_toolchain::PythonInstallMode::ManagedLocal
-        };
-        let interpreter = super::python_toolchain::available_interpreter(mode, environment).await?;
+        let interpreter = super::python_toolchain::available_interpreter(environment).await?;
         if !platform_runner
             && context
                 .application_runtime

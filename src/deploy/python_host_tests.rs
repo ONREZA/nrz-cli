@@ -457,3 +457,82 @@ async fn platform_build_uses_available_python_minor_without_declaration_gate() {
         .await
         .unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn available_python_probe_needs_no_uv_and_observes_the_path_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let executable = root.path().join("python3");
+    let environment = vec![("PATH".into(), root.path().display().to_string())];
+    assert!(available_interpreter(&environment).await.is_err());
+    for (actual, minor) in [("3.13.99", "3.13"), ("3.14.10", "3.14"), ("4.0.1", "4.0")] {
+        std::fs::write(
+            &executable,
+            format!("#!/bin/sh\nprintf '%s\n' '{actual}'\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let observed = available_interpreter(&environment).await.unwrap();
+        assert_eq!(observed.path, executable.canonicalize().unwrap());
+        assert_eq!(observed.version, actual);
+        assert_eq!(observed.minor.version(), minor);
+    }
+    std::fs::write(&executable, "#!/bin/sh\nprintf 'not-cpython\n'\n").unwrap();
+    assert!(available_interpreter(&environment).await.is_err());
+    std::fs::remove_file(executable).unwrap();
+    assert!(available_interpreter(&environment).await.is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn available_python_respects_path_directory_precedence() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let active = root.path().join("active");
+    let system = root.path().join("system");
+    std::fs::create_dir_all(&active).unwrap();
+    std::fs::create_dir_all(&system).unwrap();
+    let selected = active.join("python");
+    for (executable, version) in [(&selected, "3.13.99"), (&system.join("python3"), "3.14.10")] {
+        std::fs::write(
+            executable,
+            format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let environment = vec![(
+        "PATH".into(),
+        std::env::join_paths([active, system])
+            .unwrap()
+            .into_string()
+            .unwrap(),
+    )];
+    let observed = available_interpreter(&environment).await.unwrap();
+    assert_eq!(observed.path, selected.canonicalize().unwrap());
+    assert_eq!(observed.version, "3.13.99");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn available_python_probe_has_a_bounded_wait_for_hanging_path_shims() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let executable = root.path().join("python3");
+    std::fs::write(&executable, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let environment = vec![("PATH".into(), root.path().display().to_string())];
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        available_interpreter(&environment),
+    )
+    .await
+    .expect("the compiler probe must enforce its own deadline")
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("Python compiler version probe timed out")
+    );
+}

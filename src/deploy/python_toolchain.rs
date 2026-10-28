@@ -132,44 +132,58 @@ pub(super) struct PythonInterpreter {
 }
 
 pub(super) async fn available_interpreter(
-    mode: PythonInstallMode,
     environment: &[(String, String)],
 ) -> anyhow::Result<PythonInterpreter> {
-    let uv = resolve_for(mode).await?;
-    let command = PythonInstallCommand {
-        program: uv.clone(),
-        arguments: [
-            "python",
-            "find",
-            "cpython",
-            "--no-project",
-            "--no-config",
-            "--no-python-downloads",
-        ]
-        .map(OsString::from)
-        .to_vec(),
-        display: "select available Python compiler".into(),
-        portable_wheel_directory: None,
+    let search = environment
+        .iter()
+        .rev()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| OsString::from(value))
+        .or_else(|| std::env::var_os("PATH"))
+        .unwrap_or_default();
+    let directories: Vec<_> = std::env::split_paths(&search).collect();
+    let names = if cfg!(windows) {
+        ["python3.exe", "python.exe"]
+    } else {
+        ["python3", "python"]
     };
-    let mut process: tokio::process::Command = command.process(&uv, environment).into();
-    let output = process.kill_on_drop(true).output().await?;
-    if !output.status.success() {
-        bail!(
-            "cannot find available Python compiler: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    let path = String::from_utf8(output.stdout)?;
-    probe_interpreter(Path::new(path.trim())).await
+    let interpreter = directories
+        .iter()
+        .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
+        .find(|path| {
+            let Ok(metadata) = path.metadata() else {
+                return false;
+            };
+            if !metadata.is_file() {
+                return false;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                metadata.permissions().mode() & 0o111 != 0
+            }
+            #[cfg(not(unix))]
+            {
+                true
+            }
+        })
+        .context("no available Python compiler on PATH")?;
+    probe_interpreter(&interpreter).await
 }
 
 pub(super) async fn probe_interpreter(interpreter: &Path) -> anyhow::Result<PythonInterpreter> {
     let path = interpreter
         .canonicalize()
         .context("selected Python compiler is unavailable")?;
-    let output = tokio::process::Command::new(&path)
-        .args(["-I", "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])) if sys.implementation.name == 'cpython' else '')"])
-        .kill_on_drop(true).output().await?;
+    let output = tokio::time::timeout(
+        Duration::from_secs(8),
+        tokio::process::Command::new(&path)
+            .args(["-I", "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])) if sys.implementation.name == 'cpython' else '')"])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .context("Python compiler version probe timed out")??;
     let version = String::from_utf8(output.stdout)?;
     let mut parts = version.trim().rsplitn(2, '.');
     let patch = parts.next().unwrap_or_default();
@@ -224,7 +238,7 @@ async fn build_environment_for_host(
     validate_local_build_dependency_host_with_glibc(project_dir, mode, minor, host, glibc_version)?;
     let interpreter = match selected_interpreter {
         Some(path) => path.to_owned(),
-        None => available_interpreter(mode, environment).await?.path,
+        None => available_interpreter(environment).await?.path,
     };
     build_environment_for_interpreter(project_dir, &interpreter, environment).await
 }
