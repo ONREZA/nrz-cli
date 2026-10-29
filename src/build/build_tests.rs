@@ -337,6 +337,47 @@ fn framework_dir_wins_over_output_directory_hint() {
 }
 
 #[test]
+fn frozen_runner_output_preserves_matching_authored_express_root() {
+    let dir = tempfile::tempdir().unwrap();
+    write_build_file(
+        dir.path(),
+        "onreza.toml",
+        "[build]\noutput_directory = 'dist'\n[deploy]\nentry = 'app/cloud.mjs'\n",
+    );
+    write_build_file(dir.path(), "dist/app/cloud.mjs", "export {};\n");
+    let config = nrz::config::load(dir.path()).unwrap();
+    let mut effective =
+        nrz::config::EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+    effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+        framework_preset: Some("express".into()),
+        output_directory: Some("dist".into()),
+        output_directory_source: Some(BuildSettingSource::Preset),
+        ..Default::default()
+    });
+    let setting = effective.output_directory().unwrap();
+    let detection = make_detection("express", None);
+    let (output, _) = detect_output_dir_for_framework(
+        dir.path(),
+        &effective.output_dirs(),
+        &compute_aware_output_dirs(&detection),
+        Some(output_hint(
+            setting.value().unwrap(),
+            setting.source_or_preset(),
+        )),
+        "express",
+    )
+    .unwrap();
+
+    assert_eq!(output, dir.path().join("dist").canonicalize().unwrap());
+    assert!(output.join("app/cloud.mjs").is_file());
+    assert_eq!(setting.source_or_preset(), BuildSettingSource::User);
+    assert_eq!(
+        setting.origin(),
+        nrz::config::EffectiveSettingOrigin::LocalConfig
+    );
+}
+
+#[test]
 fn output_directory_hint_wins_over_config_dir() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("hint-out")).unwrap();

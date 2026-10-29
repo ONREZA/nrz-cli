@@ -318,6 +318,59 @@ fn platform_runner_snapshot_preserves_authoritative_command_absence() {
 }
 
 #[test]
+fn platform_runner_output_keeps_explicit_sources_and_absence_authoritative() {
+    let dir = tempfile::tempdir().unwrap();
+    for source in [BuildSettingSource::User, BuildSettingSource::Detected] {
+        for (value, expected) in [
+            (None, None),
+            (Some(""), None),
+            (Some("dist"), Some("dist")),
+            (Some("other-output"), Some("other-output")),
+        ] {
+            let mut config = ProjectConfig::default();
+            config.build.output_directory = Some("dist".into());
+            let mut effective =
+                EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+            effective.apply_platform_runner_settings(&ProjectBuildSettings {
+                output_directory: value.map(str::to_owned),
+                output_directory_source: Some(source),
+                ..Default::default()
+            });
+            let setting = effective.output_directory().unwrap();
+            assert_eq!(setting.value(), expected);
+            assert_eq!(setting.source_or_preset(), source);
+            assert_eq!(setting.origin(), EffectiveSettingOrigin::ServerSettings);
+        }
+    }
+}
+
+#[test]
+fn platform_runner_output_keeps_unmatched_presets_as_frozen_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    for (authored, frozen, expected) in [
+        (Some("dist"), None, None),
+        (Some("dist"), Some(""), None),
+        (Some("dist"), Some("other-output"), Some("other-output")),
+        (None, Some("dist"), Some("dist")),
+        (Some(""), Some("dist"), Some("dist")),
+    ] {
+        let mut config = ProjectConfig::default();
+        config.build.output_directory = authored.map(str::to_owned);
+        let mut effective =
+            EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+        effective.apply_platform_runner_settings(&ProjectBuildSettings {
+            output_directory: frozen.map(str::to_owned),
+            output_directory_source: Some(BuildSettingSource::Preset),
+            ..Default::default()
+        });
+        let setting = effective.output_directory().unwrap();
+        assert_eq!(setting.value(), expected);
+        assert_eq!(setting.source_or_preset(), BuildSettingSource::Preset);
+        assert_eq!(setting.origin(), EffectiveSettingOrigin::ServerSettings);
+    }
+}
+
+#[test]
 fn effective_config_local_framework_wins_over_server() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = ProjectConfig::default();

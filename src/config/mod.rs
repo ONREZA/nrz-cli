@@ -1003,10 +1003,23 @@ impl EffectiveProjectConfig {
             settings.build_command.clone(),
             settings.build_command_source,
         );
-        self.output_directory = SourceAwareSetting::from_platform_runner(
+        let output_directory = SourceAwareSetting::from_platform_runner(
             settings.output_directory.clone(),
             settings.output_directory_source,
         );
+        // Matching frozen defaults must not erase the authority of the source's authored output.
+        let matches_authored_output = matches!(
+            (&self.output_directory, &output_directory),
+            (Some(authored), Some(frozen))
+                if authored.origin == EffectiveSettingOrigin::LocalConfig
+                    && authored.source == Some(BuildSettingSource::User)
+                    && authored.value.is_some()
+                    && frozen.source == Some(BuildSettingSource::Preset)
+                    && authored.value == frozen.value
+        );
+        if !matches_authored_output {
+            self.output_directory = output_directory;
+        }
         self.git_lfs_enabled = settings.git_lfs_enabled;
     }
 
