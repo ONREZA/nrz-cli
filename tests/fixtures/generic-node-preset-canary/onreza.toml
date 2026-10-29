@@ -1,0 +1,6 @@
+# DEPRECATED: Incident-only no-build Node canary; remove after Git deployment acceptance.
+[deploy]
+compute = "process"
+runtime = "node"
+entry = "server.js"
+args = []

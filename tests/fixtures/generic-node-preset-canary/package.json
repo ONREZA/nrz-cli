@@ -1,0 +1,9 @@
+{
+  "name": "generic-node-preset-canary",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DEPRECATED: incident-only canary; remove after generic Node Git deployment acceptance",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
