@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.6] - 2026-10-29
+
+### 🐛 Bug Fixes
+
+- **deploy:** resume stalled source transfers ([15b1d82](https://github.com/ONREZA/nrz-cli/commit/15b1d82f78b681eb34accbf42d6714346af9557d))
+- **deploy:** preserve ssr runtime handoff ([3c124be](https://github.com/ONREZA/nrz-cli/commit/3c124bef6f0bf7a20a7167e97f21ae429469f41a))
+
 ## [0.49.5] - 2026-10-29
 
 ### 🐛 Bug Fixes
