@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.7] - 2026-10-29
+
+### 🐛 Bug Fixes
+
+- **build:** retain authored output authority ([c2d1171](https://github.com/ONREZA/nrz-cli/commit/c2d1171606580bc3d0414490ddc582d2bfada7e3))
+
 ## [0.49.6] - 2026-10-29
 
 ### 🐛 Bug Fixes
