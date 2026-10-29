@@ -6,5 +6,8 @@
   "scripts": {
     "build": "node build.js",
     "start": "node dist/app/cloud.mjs"
+  },
+  "dependencies": {
+    "express": "5.1.0"
   }
 }

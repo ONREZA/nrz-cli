@@ -3,6 +3,7 @@ const { mkdirSync, writeFileSync } = require("node:fs");
 
 mkdirSync("dist/app", { recursive: true });
 writeFileSync("dist/app/cloud.mjs", `import http from "node:http";
+await import("express");
 http.createServer((_request, response) => {
   response.writeHead(200, { "content-type": "application/json" });
   response.end(JSON.stringify({ ok: true, fixture: "generic-node-preset-canary", buildScript: true, outputDirectory: "dist" }));
