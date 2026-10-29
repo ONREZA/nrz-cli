@@ -126,14 +126,18 @@ fn freezes_workspace_projection_when_it_expands_the_planned_inventory() -> anyho
 
 #[test]
 fn rejects_inventory_mutation_before_output_copy() -> anyhow::Result<()> {
-    let source = tempdir()?;
-    let output = tempdir()?;
-    fs::write(source.path().join("index.html"), b"changed")?;
-    let owner = ArtifactRoot::open(source.path())?;
-    let files = [file("index.html", b"index")];
-    let destination = output.path().join("frozen");
-    assert!(
-        freeze_source_bundle(
+    for replacement in [b"other".as_slice(), b"changed", b"tiny"] {
+        let source = tempdir()?;
+        let output = tempdir()?;
+        fs::write(source.path().join("first.html"), b"copied first")?;
+        fs::write(source.path().join("index.html"), replacement)?;
+        let owner = ArtifactRoot::open(source.path())?;
+        let files = [
+            file("first.html", b"copied first"),
+            file("index.html", b"index"),
+        ];
+        let destination = output.path().join("frozen");
+        let error = freeze_source_bundle(
             &owner,
             &static_manifest(),
             &files,
@@ -142,9 +146,99 @@ fn rejects_inventory_mutation_before_output_copy() -> anyhow::Result<()> {
             &destination,
             SourceRuntimeMetadata::default(),
         )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Source V2 file changed during freeze"),
+            "{error}"
+        );
+        assert!(!destination.exists());
+        assert_eq!(fs::read_dir(output.path())?.count(), 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn inventory_defers_regular_file_byte_verification_to_copy() -> anyhow::Result<()> {
+    let source = tempdir()?;
+    fs::write(source.path().join("index.html"), b"other")?;
+    let owner = ArtifactRoot::open(source.path())?;
+    let files = [file("index.html", b"index")];
+    let (entries, _) = prepare_source_bundle_inventory(
+        &owner,
+        &static_manifest(),
+        &files,
+        &RuntimeArtifactScan::All,
+        RuntimeDependencyPackaging::Embedded,
+        SourceRuntimeMetadata::default(),
+        SourceFileVerification::DuringCopy,
+    )?;
+    assert_eq!(entries[0].size, files[0].size);
+    assert_eq!(entries[0].sha256, files[0].content_hash);
+    let output = tempdir()?;
+    assert!(
+        copy_file(
+            &owner,
+            Path::new("index.html"),
+            &output.path().join("copy"),
+            entries[0].size,
+            &entries[0].sha256,
+            entries[0].executable
+        )
         .is_err()
     );
-    assert!(!destination.exists());
+    assert!(
+        prepare_source_bundle_inventory(
+            &owner,
+            &static_manifest(),
+            &files,
+            &RuntimeArtifactScan::All,
+            RuntimeDependencyPackaging::Embedded,
+            SourceRuntimeMetadata::default(),
+            SourceFileVerification::Inventory,
+        )
+        .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn preserves_existing_destination_and_cleans_up_invalid_manifest() -> anyhow::Result<()> {
+    let source = tempdir()?;
+    let output = tempdir()?;
+    fs::write(source.path().join("index.html"), b"index")?;
+    let destination = output.path().join("frozen");
+    fs::create_dir(&destination)?;
+    fs::write(destination.join("owned-elsewhere"), b"preserve")?;
+    assert!(
+        freeze_source_bundle(
+            &ArtifactRoot::open(source.path())?,
+            &static_manifest(),
+            &[file("index.html", b"index")],
+            &RuntimeArtifactScan::All,
+            RuntimeDependencyPackaging::Embedded,
+            &destination,
+            SourceRuntimeMetadata::default(),
+        )
+        .is_err()
+    );
+    assert_eq!(fs::read(destination.join("owned-elsewhere"))?, b"preserve");
+    let rejected = output.path().join("rejected");
+    assert!(
+        freeze_source_bundle(
+            &ArtifactRoot::open(source.path())?,
+            &static_manifest(),
+            &[],
+            &RuntimeArtifactScan::All,
+            RuntimeDependencyPackaging::Embedded,
+            &rejected,
+            SourceRuntimeMetadata::default(),
+        )
+        .is_err()
+    );
+    assert!(!rejected.exists());
+    assert_eq!(fs::read_dir(output.path())?.count(), 1);
     Ok(())
 }
 

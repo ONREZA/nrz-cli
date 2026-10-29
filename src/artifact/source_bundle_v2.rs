@@ -12,8 +12,8 @@ use nrz_source_bundle::source_bundle_v2::{
 use sha2::{Digest, Sha256};
 
 use super::source_bundle_v1::{
-    RuntimeDependencyPackaging, SourceBundleEntryKind, SourceLogicalManifestFileRole,
-    SourceRuntimeMetadata, prepare_source_bundle_inventory,
+    RuntimeDependencyPackaging, SourceBundleEntryKind, SourceFileVerification,
+    SourceLogicalManifestFileRole, SourceRuntimeMetadata, prepare_source_bundle_inventory,
 };
 use super::{FileEntry, RuntimeArtifactScan};
 use crate::build::manifest::Manifest;
@@ -35,8 +35,8 @@ pub(crate) fn freeze_source_bundle(
         files,
         scan,
         dependency_packaging,
-        metadata.readiness,
-        metadata.runtime_policy_lineage,
+        metadata,
+        SourceFileVerification::DuringCopy,
     )?;
     for layer in &mut logical.layers {
         let application =
@@ -83,7 +83,27 @@ pub(crate) fn freeze_source_bundle(
         }
     }
     let mut output_files = Vec::with_capacity(entries.len());
-    fs::create_dir(destination).context("failed to create frozen Source V2 tree")?;
+    // Own only a newly created tree so any freeze error removes partial output.
+    let mut builder = tempfile::Builder::new();
+    builder
+        .prefix(
+            destination
+                .file_name()
+                .context("frozen Source V2 tree has no name")?,
+        )
+        .rand_bytes(0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    let frozen = builder
+        .tempdir_in(
+            destination
+                .parent()
+                .context("frozen Source V2 tree has no parent")?,
+        )
+        .context("failed to create frozen Source V2 tree")?;
     for (entry, logical_file) in entries.iter().zip(&logical.files) {
         ensure!(
             entry.path == logical_file.path,
@@ -168,6 +188,7 @@ pub(crate) fn freeze_source_bundle(
             .any(|file| matches!(file, wire::FileEntry::File { .. })),
         "SOURCE_BUNDLE_V2 output must contain a regular file"
     );
+    let _ = frozen.keep();
     Ok((bytes, verified))
 }
 

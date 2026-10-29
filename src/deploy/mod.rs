@@ -89,6 +89,7 @@ pub(crate) use runtime_artifact::{
     apply_rebuilt_application_runtime_manifest,
 };
 use runtime_packaging::*;
+#[cfg(test)]
 pub(crate) use scan::hash_open_file_streaming;
 #[cfg(test)]
 pub(crate) use scan::scan_dir;

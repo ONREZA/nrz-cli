@@ -107,8 +107,11 @@ pub(crate) fn build_source_bundle_plan_with_root(
         files,
         scan,
         dependency_packaging,
-        readiness,
-        runtime_policy_lineage,
+        SourceRuntimeMetadata {
+            readiness,
+            runtime_policy_lineage,
+        },
+        SourceFileVerification::Inventory,
     )?;
     let logical_manifest_json = canonical_logical_manifest_json(&logical_manifest)?;
     let logical_manifest_sha256 = sha256_hex(logical_manifest_json.as_bytes());

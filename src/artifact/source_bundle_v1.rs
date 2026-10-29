@@ -23,6 +23,7 @@ mod tests;
 use crate::artifact::{FileEntry, RuntimeArtifactScan};
 use crate::build::manifest::{LayerTarget, Manifest};
 use crate::deploy::hash::sha256_hex;
+#[cfg(test)]
 use crate::deploy::hash_open_file_streaming;
 use nrz_runtime_artifact::ArtifactRoot;
 
@@ -175,16 +176,23 @@ pub(crate) struct SourceRuntimeMetadata<'a> {
     pub(crate) runtime_policy_lineage: Option<(&'a str, &'a str)>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum SourceFileVerification {
+    #[cfg(test)]
+    Inventory,
+    DuringCopy,
+}
+
 pub(super) fn prepare_source_bundle_inventory(
     root: &ArtifactRoot,
     manifest: &Manifest,
     files: &[FileEntry],
     scan: &RuntimeArtifactScan,
     dependency_packaging: RuntimeDependencyPackaging,
-    readiness: Option<RuntimeReadinessContract<'_>>,
-    runtime_policy_lineage: Option<(&str, &str)>,
+    metadata: SourceRuntimeMetadata<'_>,
+    verification: SourceFileVerification,
 ) -> anyhow::Result<(Vec<SourceBundleEntry>, SourceLogicalManifest)> {
-    let mut entries = source_entries_rooted(root, files, scan)?;
+    let mut entries = source_entries_rooted(root, files, scan, verification)?;
     let mut native_files = HashMap::new();
     let has_native = manifest.layers.iter().any(|layer| {
         layer.target == LayerTarget::Compute
@@ -260,9 +268,14 @@ pub(super) fn prepare_source_bundle_inventory(
         // including publication from hosts without POSIX executable bits.
         file.executable = true;
     }
-    let mut logical_manifest =
-        build_logical_manifest(manifest, &entries, scan, dependency_packaging, readiness)?;
-    if let Some((layer_name, lineage)) = runtime_policy_lineage {
+    let mut logical_manifest = build_logical_manifest(
+        manifest,
+        &entries,
+        scan,
+        dependency_packaging,
+        metadata.readiness,
+    )?;
+    if let Some((layer_name, lineage)) = metadata.runtime_policy_lineage {
         let layer = logical_manifest
             .layers
             .iter_mut()
@@ -342,13 +355,19 @@ fn source_entries(
     files: &[FileEntry],
     scan: &RuntimeArtifactScan,
 ) -> anyhow::Result<Vec<SourceBundleEntry>> {
-    source_entries_rooted(&ArtifactRoot::open(output_dir)?, files, scan)
+    source_entries_rooted(
+        &ArtifactRoot::open(output_dir)?,
+        files,
+        scan,
+        SourceFileVerification::Inventory,
+    )
 }
 
 pub(super) fn source_entries_rooted(
     root: &ArtifactRoot,
     files: &[FileEntry],
     scan: &RuntimeArtifactScan,
+    verification: SourceFileVerification,
 ) -> anyhow::Result<Vec<SourceBundleEntry>> {
     let mut entries = Vec::with_capacity(files.len());
     for file in files {
@@ -386,14 +405,23 @@ pub(super) fn source_entries_rooted(
         }
         let input = root.open_file(&source_path)?;
         let metadata = input.metadata()?;
-        let (size, sha256) = hash_open_file_streaming(input)
-            .with_context(|| format!("failed to hash SOURCE_BUNDLE_V1 file {}", file.path))?;
-        if size != file.size || sha256 != file.content_hash {
-            bail!(
-                "SOURCE_BUNDLE_V1 file changed during packaging: {}",
-                file.path
-            );
-        }
+        let (size, sha256) = match verification {
+            #[cfg(test)]
+            SourceFileVerification::Inventory => {
+                let (size, sha256) = hash_open_file_streaming(input).with_context(|| {
+                    format!("failed to hash SOURCE_BUNDLE_V1 file {}", file.path)
+                })?;
+                if size != file.size || sha256 != file.content_hash {
+                    bail!(
+                        "SOURCE_BUNDLE_V1 file changed during packaging: {}",
+                        file.path
+                    );
+                }
+                (size, sha256)
+            }
+            // V2 checks these planner expectations against every byte it copies.
+            SourceFileVerification::DuringCopy => (file.size, file.content_hash.clone()),
+        };
         entries.push(SourceBundleEntry {
             path: file.path.clone(),
             size,
