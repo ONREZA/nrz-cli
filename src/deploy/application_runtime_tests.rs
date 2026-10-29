@@ -594,3 +594,140 @@ async fn selected_node_declaration_does_not_reject_available_newer_or_older_comp
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn fresh_typed_output_without_source_launch_needs_no_trusted_serving_target() {
+    const CASE: &str = "ONREZA_FRESH_TYPED_OUTPUT_TEST";
+    if std::env::var_os(CASE).is_none() {
+        let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "deploy::application_runtime::tests::fresh_typed_output_without_source_launch_needs_no_trusted_serving_target", "--nocapture"])
+            .env(CASE, "1")
+            .env_remove("ONREZA_RUNTIME_VERSION")
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("package.json"), r#"{"scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.2.9"}}"#).unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.toolchain = Some(BuildToolchainFamily::Bun);
+    let mut detection = crate::detect::detect_with_framework_override(directory.path(), None);
+    let original = crate::detect::application_runtime::resolve_and_bind_source_build_context(
+        &crate::detect::fs::LocalFs::new(directory.path()),
+        &mut detection,
+        &config,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(detection.framework, "nextjs");
+    assert_eq!(original.build_toolchain.family, BuildToolchainFamily::Bun);
+    assert!(original.application_runtime.is_none());
+    for platform_runner in [false, true] {
+        let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+            directory.path().to_owned(),
+            config.clone(),
+        );
+        if platform_runner {
+            effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+                source_build_context: Some(original.clone()),
+                ..Default::default()
+            });
+        }
+        effective.bind_resolved_platform_context(original.clone(), None, None);
+        effective.mark_primary_runtime_rebuilt();
+        let mut generated = crate::build::manifest::generate_nextjs_standalone_manifest_for_server(
+            false,
+            "",
+            "server.js",
+        );
+        let selected = manifest_build_runtime_target(
+            &detection.metadata.runtime,
+            &effective,
+            &generated,
+            None,
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(selected.as_deref(), Some("node"));
+        crate::deploy::apply_rebuilt_application_runtime_manifest(
+            &mut generated,
+            None,
+            selected.as_deref(),
+            "nextjs",
+        )
+        .unwrap();
+        assert_eq!(
+            generated
+                .layers
+                .last()
+                .unwrap()
+                .runtime
+                .as_ref()
+                .unwrap()
+                .build_runtime_version
+                .as_deref(),
+            Some("node")
+        );
+        for (family, target) in [
+            (ApplicationRuntimeFamily::Node, "node-23"),
+            (ApplicationRuntimeFamily::Python, "python-3.11"),
+        ] {
+            for retained_target in [None, Some(target)] {
+                let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
+                manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+                    network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
+                    application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
+                        family,
+                        args: vec![],
+                    }),
+                    build_runtime_version: retained_target.map(str::to_owned),
+                    ..Default::default()
+                });
+                let before = serde_json::to_value(&manifest).unwrap();
+                let target = manifest_build_runtime_target(
+                    &RuntimeInfo {
+                        runtime_type: RuntimeType::Bun,
+                        version: Some("1.4.3".into()),
+                    },
+                    &effective,
+                    &manifest,
+                    None,
+                    &[],
+                )
+                .await
+                .unwrap();
+                assert_eq!(target, None);
+                crate::deploy::apply_rebuilt_application_runtime_manifest(
+                    &mut manifest,
+                    None,
+                    target.as_deref(),
+                    "other",
+                )
+                .unwrap();
+                if retained_target.is_some() {
+                    assert_eq!(serde_json::to_value(&manifest).unwrap(), before);
+                } else {
+                    let actual = manifest.layers[0]
+                        .runtime
+                        .as_ref()
+                        .unwrap()
+                        .build_runtime_version
+                        .as_deref();
+                    assert_eq!(
+                        actual,
+                        (family == ApplicationRuntimeFamily::Python).then_some("python")
+                    );
+                }
+            }
+        }
+    }
+}

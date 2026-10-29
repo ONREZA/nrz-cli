@@ -124,6 +124,7 @@ pub(crate) async fn manifest_build_runtime_target(
     )
     .await?;
     let fresh_platform_target = if platform_runner
+        && declaration.is_some()
         && effective.primary_runtime_rebuilt()
         && effective.application_runtime_target().is_none()
     {
