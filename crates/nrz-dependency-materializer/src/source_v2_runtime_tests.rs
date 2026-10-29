@@ -426,6 +426,33 @@ fn python_checks_compute_dependency_and_cross_role_file_targets_without_rejectin
 }
 
 #[test]
+fn family_only_python_source_keeps_concrete_admitted_dependency_minor_guard() {
+    for (root_minor, allowed) in [("3.13", true), ("3.12", false)] {
+        let root_path = format!(".onreza/python/{root_minor}/site-packages");
+        let file_path = format!("{root_path}/a.py");
+        let source = prepare(
+            manifest(
+                "PYTHON",
+                "python",
+                vec![file(&file_path, "dependency", Some("app"))],
+            ),
+            &[],
+        );
+        let root = dependency(
+            &root_path,
+            "python-3.13",
+            DependencyMaterializationKind::PythonSitePackages,
+        );
+        assert_eq!(
+            verify_prepared_source_v2_runtime(&source, &target("python-3.13"), &[root], limits())
+                .is_ok(),
+            allowed,
+            "root minor {root_minor}"
+        );
+    }
+}
+
+#[test]
 fn python_dependency_minor_is_not_inferred_from_source_claims() {
     let source = prepare(
         manifest(

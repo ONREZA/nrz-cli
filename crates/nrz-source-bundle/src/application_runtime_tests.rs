@@ -195,3 +195,29 @@ fn source_runtime_summary_preserves_consistent_and_mixed_layer_families() {
     .unwrap();
     assert!(source_application_runtime(&manifest).is_err());
 }
+
+#[test]
+fn family_only_build_declarations_match_only_the_same_admitted_family() {
+    for (declared, target, allowed) in [
+        ("node", Some("node-24"), true),
+        ("node", Some("node-24.1.2"), true),
+        ("python", Some("python-3.13"), true),
+        ("python", Some("python-3.13.17"), true),
+        ("node", Some("python-3.13"), false),
+        ("python", Some("node-24"), false),
+        ("node", Some("node-024"), false),
+        ("python", Some("python-3.013"), false),
+        ("node-20", Some("node-24"), false),
+        ("python-3.12", Some("python-3.13"), false),
+        ("node", Some("node"), true),
+        ("python", Some("python"), true),
+        ("node", None, false),
+    ] {
+        let config = json!({"buildRuntimeVersion": declared});
+        assert_eq!(
+            validate_build_runtime_version(Some(&config), target).is_ok(),
+            allowed,
+            "{declared}/{target:?}"
+        );
+    }
+}

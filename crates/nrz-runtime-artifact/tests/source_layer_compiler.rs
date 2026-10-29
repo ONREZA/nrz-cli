@@ -428,3 +428,24 @@ fn missing_compiler_witness_preserves_only_the_explicit_runtime_family() {
         assert!(compile_source_runtime_layer_for_target(&witnessed, &[], Some(target)).is_ok());
     }
 }
+
+#[test]
+fn family_only_source_declaration_uses_admitted_output_without_changing_raw_facts() {
+    for (family, declared, target, profile) in [
+        ("NODE", "node", "node-24", "NODE_24"),
+        ("PYTHON", "python", "python-3.13", "CPYTHON_3_13"),
+    ] {
+        let source = manifest(json!({
+            "applicationRuntime": {"family": family, "args": []},
+            "buildRuntimeVersion": declared
+        }));
+        let original = serde_json::to_value(&source).unwrap();
+        let value =
+            compile_source_runtime_layer_for_target(&source.layers[0], &[], Some(target)).unwrap();
+        let runtime: nrz_runtime_artifact::RuntimeLayerWire =
+            serde_json::from_value(value).unwrap();
+        verify_source_runtime_layer_for_target(&source.layers[0], &runtime, Some(target)).unwrap();
+        assert_eq!(runtime.launch.unwrap().profile.to_string(), profile);
+        assert_eq!(serde_json::to_value(&source).unwrap(), original);
+    }
+}

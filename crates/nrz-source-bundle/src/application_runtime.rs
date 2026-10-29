@@ -184,6 +184,23 @@ pub fn layer_application_runtime(
     Ok(Some(intent))
 }
 
+/// Match a family-only source declaration against an independently admitted output target.
+pub fn build_runtime_version_matches_target(version: &str, target: &str) -> bool {
+    use nrz_contract::RuntimeProfile;
+    version == target
+        || match version {
+            "node" => matches!(
+                RuntimeProfile::node_build_target(target),
+                Some(RuntimeProfile::Node(_))
+            ),
+            "python" => matches!(
+                RuntimeProfile::python_build_target(target),
+                Some(RuntimeProfile::Cpython(_, _))
+            ),
+            _ => false,
+        }
+}
+
 pub fn validate_build_runtime_version(
     config: Option<&Value>,
     target: Option<&str>,
@@ -194,7 +211,7 @@ pub fn validate_build_runtime_version(
     let version = version
         .as_str()
         .ok_or_else(|| "buildRuntimeVersion must be a string".to_string())?;
-    if Some(version) != target {
+    if !target.is_some_and(|target| build_runtime_version_matches_target(version, target)) {
         return Err(format!(
             "application build runtime version {version} differs from admitted target {target:?}"
         ));
