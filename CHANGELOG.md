@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.3] - 2026-10-29
+
+### ⚡ Performance
+
+- **cli:** avoid redundant source hashing ([e2b3eec](https://github.com/ONREZA/nrz-cli/commit/e2b3eecaf83c7caee63c9ad4901be142b280f1d8))
+
 ## [0.49.2] - 2026-10-28
 
 ### 📚 Documentation
