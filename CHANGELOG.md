@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.5] - 2026-10-29
+
+### 🐛 Bug Fixes
+
+- **deploy:** bind output without serving intent ([f3acc46](https://github.com/ONREZA/nrz-cli/commit/f3acc4606892260deeec2d8948c5e3ff954831a6))
+
 ## [0.49.4] - 2026-10-29
 
 ### 🐛 Bug Fixes
