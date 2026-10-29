@@ -1,6 +1,9 @@
-# DEPRECATED: Incident-only no-build Node canary; remove after Git deployment acceptance.
+# DEPRECATED: Incident-only built Node canary; remove after built-output Git deployment acceptance.
+[build]
+output_directory = "dist"
+
 [deploy]
 compute = "process"
 runtime = "node"
-entry = "server.js"
+entry = "app/cloud.mjs"
 args = []
