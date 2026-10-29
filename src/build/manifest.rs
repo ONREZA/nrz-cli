@@ -973,7 +973,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
                 revalidate: None,
                 methods: None,
                 headers: None,
-                fallthrough: None,
+                fallthrough: Some(true),
                 fallthrough_when: None,
             });
         }

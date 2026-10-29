@@ -833,7 +833,7 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
             .unwrap();
         }
         let target = if frozen_runtime.is_null() {
-            "node-24"
+            "node"
         } else {
             "bun-1.4.3"
         };
@@ -863,7 +863,7 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
         assert_eq!(
             launch.profile.to_string(),
             if frozen_runtime.is_null() {
-                "NODE_24"
+                "NODE"
             } else {
                 "BUN"
             }
@@ -942,17 +942,22 @@ fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_h
         }
         assert!(!output.status.success());
         let result = stdout_json(&output);
-        assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
+        assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID", "{result}");
         assert!(
             result["error"]
                 .as_str()
                 .unwrap()
-                .contains("conflicts with framework elysia"),
+                .contains(if frozen_runtime.is_null() {
+                    "requires a retained or admitted Bun build target"
+                } else {
+                    "conflicts with framework elysia"
+                }),
             "{result}"
         );
         assert!(project.path().join("build-completed").exists());
         assert!(!project.path().join("package_temp.json").exists());
         assert!(!output_dir.path().join("source-bundle-v1.tar.zst").exists());
+        assert!(!output_dir.path().join("source-manifest-v2.json").exists());
         assert!(
             !output_dir
                 .path()
@@ -969,6 +974,7 @@ fn retained_platform_handoff_preserves_authored_targets_without_new_build_facts(
         ("NODE", "node-24", "node-26", None, true, true),
         ("NODE", "node-24", "node-26", None, false, true),
         ("NODE", "node-24", "node-26", None, true, false),
+        ("NODE", "node-28", "node-24", None, true, false),
         ("NODE", "node-24", "node-26", None, false, false),
         (
             "PYTHON",
@@ -1064,19 +1070,6 @@ fn retained_platform_handoff_preserves_authored_targets_without_new_build_facts(
                 .env("ONREZA_RUNTIME_VERSION", admitted_target)
                 .output()
                 .unwrap();
-        if !typed && !declared_target {
-            assert!(!result.status.success());
-            let result = stdout_json(&result);
-            assert!(
-                result["error"]
-                    .as_str()
-                    .unwrap()
-                    .contains("requires an explicit application runtime"),
-                "{result}"
-            );
-            assert!(!output.path().join("source-bundle-v1.tar.zst").exists());
-            continue;
-        }
         let manifest = source_bundle_manifest(output.path(), &result, old_target);
         let runtime = manifest.layers[0].runtime_config.as_ref().unwrap();
         assert_eq!(
@@ -1088,6 +1081,10 @@ fn retained_platform_handoff_preserves_authored_targets_without_new_build_facts(
             } else {
                 "python"
             }
+        );
+        assert_eq!(
+            runtime["applicationRuntime"],
+            json!({"family":family,"args":[]})
         );
         assert!(runtime.get("runtimePolicyLineage").is_none());
         if family != "PYTHON" {

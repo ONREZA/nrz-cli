@@ -44,6 +44,17 @@ pub(super) fn assert_static_server_routes(
     assert_eq!(manifest.routes[2].pattern, "^/.*$");
     assert_eq!(manifest.routes[2].layer, "server");
     assert_eq!(manifest.routes[2].priority, Some(0));
+
+    let serialized = serde_json::to_value(manifest).unwrap();
+    let contract: nrz_contract::manifest::OnrezaBuildOutputManifest =
+        serde_json::from_value(serialized.clone()).unwrap();
+    let frozen: nrz_api::MetadatumRequestBodyManifest =
+        serde_json::from_value(serde_json::to_value(contract).unwrap()).unwrap();
+    for wire in [serialized, serde_json::to_value(frozen).unwrap()] {
+        assert_eq!(wire["routes"][1]["fallthrough"], true);
+        assert!(wire["routes"][0].get("fallthrough").is_none());
+        assert!(wire["routes"][2].get("fallthrough").is_none());
+    }
 }
 
 fn make_ssr_detection(framework: &str, feature: &str) -> crate::detect::types::DetectionResult {

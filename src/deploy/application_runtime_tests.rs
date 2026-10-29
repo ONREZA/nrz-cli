@@ -165,6 +165,31 @@ fn fresh_local_bun_uses_measured_target_while_retained_claim_stays_immutable() {
     )
     .unwrap();
     assert_eq!(serde_json::to_value(&siblings).unwrap(), before);
+    let mut untyped_siblings: crate::build::manifest::Manifest =
+        serde_json::from_value(before).unwrap();
+    for layer in &mut untyped_siblings.layers {
+        layer.runtime.as_mut().unwrap().application_runtime = None;
+    }
+    let selected = canonical_build_runtime_target(
+        &runtime,
+        true,
+        None,
+        Some(&untyped_siblings),
+        None,
+        None,
+        false,
+    )
+    .unwrap();
+    assert_eq!(selected, None);
+    let before = serde_json::to_value(&untyped_siblings).unwrap();
+    crate::deploy::apply_application_runtime_manifest(
+        &mut untyped_siblings,
+        None,
+        selected.as_deref(),
+        "other",
+    )
+    .unwrap();
+    assert_eq!(serde_json::to_value(&untyped_siblings).unwrap(), before);
     let fresh = canonical_build_runtime_target(
         &runtime,
         false,
@@ -683,15 +708,12 @@ async fn fresh_typed_output_without_source_launch_needs_no_trusted_serving_targe
         ] {
             for retained_target in [None, Some(target)] {
                 let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
-                manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
-                    network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
-                    application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
-                        family,
-                        args: vec![],
-                    }),
-                    build_runtime_version: retained_target.map(str::to_owned),
-                    ..Default::default()
+                let runtime = manifest.layers[0].runtime.as_mut().unwrap();
+                runtime.application_runtime = Some(nrz_source_bundle::ApplicationRuntimeIntent {
+                    family,
+                    args: vec![],
                 });
+                runtime.build_runtime_version = retained_target.map(str::to_owned);
                 let before = serde_json::to_value(&manifest).unwrap();
                 let target = manifest_build_runtime_target(
                     &RuntimeInfo {

@@ -854,17 +854,22 @@ pub(crate) fn apply_application_runtime_manifest(
             // canonical_build_runtime_target validates its supported target.
             None
         } else {
-            let launch = nrz_runtime_artifact::source_layer_launch_for_target(None, target)
+            let target = target.ok_or_else(|| {
+                output::coded_error(
+                    "APPLICATION_RUNTIME_INVALID",
+                    "a Bun COMPUTE layer requires a retained or admitted Bun build target",
+                )
+            })?;
+            let launch = nrz_runtime_artifact::source_layer_launch_for_target(None, Some(target))
                 .map_err(|error| {
-                    output::coded_error("APPLICATION_RUNTIME_INVALID", error.to_string())
-                })?;
+                output::coded_error("APPLICATION_RUNTIME_INVALID", error.to_string())
+            })?;
             match launch.profile {
                 nrz_runtime_artifact::RuntimeProfile::Bun => {
                     Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun)
                 }
-                nrz_runtime_artifact::RuntimeProfile::Node22
-                | nrz_runtime_artifact::RuntimeProfile::Node24
-                | nrz_runtime_artifact::RuntimeProfile::Node26 => {
+                nrz_runtime_artifact::RuntimeProfile::NodeAny
+                | nrz_runtime_artifact::RuntimeProfile::Node(_) => {
                     Some(nrz_source_bundle::ApplicationRuntimeFamily::Node)
                 }
                 _ => None,

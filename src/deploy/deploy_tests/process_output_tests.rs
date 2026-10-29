@@ -77,10 +77,11 @@ fn manifest_static_only_maps_to_static() {
 // ── validate_process_output tests ────────────────────────────
 
 #[test]
-fn validate_nextjs_dot_next_without_standalone_bails() {
+fn validate_nextjs_static_export_selected_as_process_suggests_static() {
     let dir = tempdir().unwrap();
-    let output_dir = dir.path().join(".next");
+    let output_dir = dir.path().join("out");
     fs::create_dir(&output_dir).unwrap();
+    fs::write(output_dir.join("index.html"), "<h1>static export</h1>").unwrap();
 
     let detection = make_detection("nextjs", None);
     let result = validate_process_output(&output_dir, dir.path(), &detection);
@@ -90,6 +91,9 @@ fn validate_nextjs_dot_next_without_standalone_bails() {
         msg.contains("output: 'standalone'"),
         "should mention standalone: {msg}"
     );
+    assert!(msg.contains("PROCESS"), "{msg}");
+    assert!(msg.contains("--compute static"), "{msg}");
+    assert!(msg.contains("output: 'export'"), "{msg}");
 }
 
 #[test]
