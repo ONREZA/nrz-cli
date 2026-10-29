@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.4] - 2026-10-29
+
+### 🐛 Bug Fixes
+
+- **deploy:** normalize next static urls ([84e27b4](https://github.com/ONREZA/nrz-cli/commit/84e27b4cbbd9ac76b3a873fd90d8cd435ef0ff30))
+- **deploy:** match generic runtime targets ([b9ff75b](https://github.com/ONREZA/nrz-cli/commit/b9ff75b64b180da4c7d66e12726c6a4bf14bc9c3))
+
 ## [0.49.3] - 2026-10-29
 
 ### ⚡ Performance
