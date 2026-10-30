@@ -30,6 +30,7 @@ fn runtime_working_allowance_funds_native_index_and_managed_growth_separately() 
         ManagedContext::DarwinArm64,
         ManagedContext::Win32X64,
         ManagedContext::Win32Arm64,
+        ManagedContext::Win32Ia32,
     ];
     for files in [1_u64, 7, 64, 257, 1025] {
         let nodes = files * 2;
@@ -891,6 +892,14 @@ fn labelled_foreign_addons_remain_opaque_without_weakening_host_or_alias_checks(
     windows[148..150].copy_from_slice(&112u16.to_le_bytes());
     windows[150..152].copy_from_slice(&0x2000u16.to_le_bytes());
     windows[152..154].copy_from_slice(&0x20bu16.to_le_bytes());
+    let mut windows_ia32 = windows.clone();
+    windows_ia32[132..134].copy_from_slice(&0x014cu16.to_le_bytes());
+    windows_ia32[148..150].copy_from_slice(&96u16.to_le_bytes());
+    windows_ia32[152..154].copy_from_slice(&0x10bu16.to_le_bytes());
+    let mut windows_ia32_wrong_magic = windows_ia32.clone();
+    windows_ia32_wrong_magic[152..154].copy_from_slice(&0x20bu16.to_le_bytes());
+    let mut windows_x64_wrong_magic = windows.clone();
+    windows_x64_wrong_magic[152..154].copy_from_slice(&0x10bu16.to_le_bytes());
     let root = dependency(
         "node_modules",
         "node-24",
@@ -900,6 +909,10 @@ fn labelled_foreign_addons_remain_opaque_without_weakening_host_or_alias_checks(
         ("node_modules/pkg/arm64-darwin.node", darwin_arm.as_slice()),
         ("node_modules/pkg/x64-darwin.node", darwin_x64.as_slice()),
         ("node_modules/pkg/x64-win32.node", windows.as_slice()),
+        (
+            "node_modules/bufferutil/prebuilds/win32-ia32/bufferutil.node",
+            windows_ia32.as_slice(),
+        ),
         ("node_modules/pkg/arm64-linux.node", arm.as_slice()),
         ("node_modules/pkg/x64-linux.node", linux.as_slice()),
     ];
@@ -924,6 +937,31 @@ fn labelled_foreign_addons_remain_opaque_without_weakening_host_or_alias_checks(
         (
             "node_modules/pkg/x64-win32-bad.node",
             b"version https://git-lfs.github.com/spec/v1".as_slice(),
+            false,
+        ),
+        (
+            "node_modules/pkg/ia32-win32-bad.node",
+            &windows_ia32[..153],
+            false,
+        ),
+        (
+            "node_modules/pkg/ia32-win32-bad.node",
+            windows_ia32_wrong_magic.as_slice(),
+            false,
+        ),
+        (
+            "node_modules/pkg/x64-win32-bad.node",
+            windows_x64_wrong_magic.as_slice(),
+            false,
+        ),
+        (
+            "node_modules/pkg/ia32-win32-bad.node",
+            windows.as_slice(),
+            false,
+        ),
+        (
+            "node_modules/pkg/x64-win32-bad.node",
+            windows_ia32.as_slice(),
             false,
         ),
     ] {

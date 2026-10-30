@@ -103,7 +103,7 @@ pub enum RuntimeVerificationError {
 
 type Result<T> = std::result::Result<T, RuntimeVerificationError>;
 
-const MAX_MANAGED_CONTEXTS: u64 = 9;
+const MAX_MANAGED_CONTEXTS: u64 = 10;
 const ADDON_HEADER_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -117,6 +117,7 @@ enum ManagedContext {
     DarwinArm64,
     Win32X64,
     Win32Arm64,
+    Win32Ia32,
 }
 
 impl ManagedContext {
@@ -129,7 +130,7 @@ impl ManagedContext {
             for token in component.split(['-', '_', '.']) {
                 let selected = match token {
                     "linux" | "darwin" | "win32" => &mut operating_system,
-                    "x64" | "arm64" => &mut architecture,
+                    "x64" | "arm64" | "ia32" => &mut architecture,
                     _ => continue,
                 };
                 if selected.replace(token).is_some_and(|prior| prior != token) {
@@ -143,6 +144,7 @@ impl ManagedContext {
                 (Some("darwin"), Some("arm64")) => Self::DarwinArm64,
                 (Some("win32"), Some("x64")) => Self::Win32X64,
                 (Some("win32"), Some("arm64")) => Self::Win32Arm64,
+                (Some("win32"), Some("ia32")) => Self::Win32Ia32,
                 _ => continue,
             };
             if self != Self::Unlabelled && self != platform {
@@ -160,6 +162,7 @@ impl ManagedContext {
             Self::DarwinArm64 => Some(("darwin", "arm64")),
             Self::Win32X64 => Some(("win32", "x64")),
             Self::Win32Arm64 => Some(("win32", "arm64")),
+            Self::Win32Ia32 => Some(("win32", "ia32")),
             _ => None,
         }
     }
@@ -559,7 +562,12 @@ fn foreign_addon_header(header: &[u8], bytes: u64, platform: (&str, &str)) -> bo
             else {
                 return false;
             };
-            let machine = if arch == "x64" { 0x8664 } else { 0xaa64 };
+            let (machine, magic, minimum_optional) = match arch {
+                "x64" => (0x8664, 0x020b, 112),
+                "arm64" => (0xaa64, 0x020b, 112),
+                "ia32" => (0x014c, 0x010b, 96),
+                _ => return false,
+            };
             let sections = u16::from_le_bytes(pe[6..8].try_into().unwrap());
             let optional = u16::from_le_bytes(pe[20..22].try_into().unwrap());
             header[..2] == *b"MZ"
@@ -567,9 +575,9 @@ fn foreign_addon_header(header: &[u8], bytes: u64, platform: (&str, &str)) -> bo
                 && pe[..4] == *b"PE\0\0"
                 && u16::from_le_bytes(pe[4..6].try_into().unwrap()) == machine
                 && sections > 0
-                && optional >= 112
+                && optional >= minimum_optional
                 && u16::from_le_bytes(pe[22..24].try_into().unwrap()) & 0x2000 != 0
-                && pe[24..26] == [0x0b, 0x02]
+                && u16::from_le_bytes(pe[24..26].try_into().unwrap()) == magic
                 && offset as u64 + 24 + u64::from(optional) + u64::from(sections) * 40 <= bytes
         }
         _ => false,
