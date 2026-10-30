@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.8] - 2026-10-30
+
+### 🐛 Bug Fixes
+
+- **deploy:** retain implicit runtime artifacts ([459033f](https://github.com/ONREZA/nrz-cli/commit/459033f9e84c2cb5b57dc879a4e913c4308cb0e6))
+
 ## [0.49.7] - 2026-10-29
 
 ### 🐛 Bug Fixes
