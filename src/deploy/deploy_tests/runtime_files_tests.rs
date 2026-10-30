@@ -1008,6 +1008,80 @@ fn astro_node_runtime_artifact_includes_project_dependencies() {
 }
 
 #[test]
+fn tanstack_node_output_relocates_with_owned_project_dependencies() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{"packageManager":"bun@1.4.2","dependencies":{"runtime-pkg":"1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("onreza.toml"),
+        "[build]\ntoolchain = 'bun'\noutput_directory = '.output'\n[deploy]\nruntime = 'node'\nentry = 'server/index.mjs'\nargs = []\n",
+    )
+    .unwrap();
+    fs::create_dir_all(project.path().join(".output/server")).unwrap();
+    fs::write(
+        project.path().join(".output/server/index.mjs"),
+        "import value from 'runtime-pkg'; export default value;",
+    )
+    .unwrap();
+    fs::create_dir_all(project.path().join("node_modules/runtime-pkg")).unwrap();
+    fs::write(
+        project.path().join("node_modules/runtime-pkg/package.json"),
+        r#"{"name":"runtime-pkg","version":"1.0.0","type":"module","main":"index.js"}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("node_modules/runtime-pkg/index.js"),
+        "export default 'PROJECT_DEPENDENCY_RETAINED';",
+    )
+    .unwrap();
+    let detection =
+        crate::detect::detect_with_framework_override(project.path(), Some("tanstack-start"));
+    let manifest = serde_json::from_value(serde_json::json!({
+        "version":2,"routes":[{"pattern":"^/.*$","layer":"server"}],
+        "layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server/index.mjs",
+            "runtime":{"network":crate::network_fixture::network(),"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}}]
+    })).unwrap();
+    let artifact = resolve_runtime_artifact_with_manifest_source(
+        project.path(),
+        project.path(),
+        project.path().join(".output"),
+        manifest,
+        &detection,
+        true,
+        RuntimeArtifactManifestContext {
+            source: crate::artifact::BuildManifestSource::Generated,
+            configured_output_entry: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(artifact.root_dir, project.path());
+    assert_eq!(
+        artifact.manifest.layers[0].entry.as_deref(),
+        Some(".output/server/index.mjs")
+    );
+    let source = runtime_source_bundle_with_checked_entrypoints(&artifact);
+    let dependency = source
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "node_modules/runtime-pkg/index.js")
+        .expect("project runtime dependency must survive artifact packaging");
+    assert_dependency_owner(dependency, "server");
+    let server = &source.logical_manifest.layers[0];
+    assert_eq!(
+        server.entrypoint.as_deref(),
+        Some(".output/server/index.mjs")
+    );
+    assert_eq!(
+        server.runtime_config.as_ref().unwrap()["applicationRuntime"]["family"],
+        "NODE"
+    );
+}
+
+#[test]
 fn adapter_node_runtimes_include_project_dependencies() {
     for (framework, entry, manifest) in [
         (

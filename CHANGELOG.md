@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.8] - 2026-10-30
+
+### 🐛 Bug Fixes
+
+- **deploy:** retain implicit runtime artifacts ([459033f](https://github.com/ONREZA/nrz-cli/commit/459033f9e84c2cb5b57dc879a4e913c4308cb0e6))
+
+## [0.49.7] - 2026-10-29
+
+### 🐛 Bug Fixes
+
+- **build:** retain authored output authority ([c2d1171](https://github.com/ONREZA/nrz-cli/commit/c2d1171606580bc3d0414490ddc582d2bfada7e3))
+
+## [0.49.6] - 2026-10-29
+
+### 🐛 Bug Fixes
+
+- **deploy:** resume stalled source transfers ([15b1d82](https://github.com/ONREZA/nrz-cli/commit/15b1d82f78b681eb34accbf42d6714346af9557d))
+- **deploy:** preserve ssr runtime handoff ([3c124be](https://github.com/ONREZA/nrz-cli/commit/3c124bef6f0bf7a20a7167e97f21ae429469f41a))
+
+## [0.49.5] - 2026-10-29
+
+### 🐛 Bug Fixes
+
+- **deploy:** bind output without serving intent ([f3acc46](https://github.com/ONREZA/nrz-cli/commit/f3acc4606892260deeec2d8948c5e3ff954831a6))
+
+## [0.49.4] - 2026-10-29
+
+### 🐛 Bug Fixes
+
+- **deploy:** normalize next static urls ([84e27b4](https://github.com/ONREZA/nrz-cli/commit/84e27b4cbbd9ac76b3a873fd90d8cd435ef0ff30))
+- **deploy:** match generic runtime targets ([b9ff75b](https://github.com/ONREZA/nrz-cli/commit/b9ff75b64b180da4c7d66e12726c6a4bf14bc9c3))
+
 ## [0.49.3] - 2026-10-29
 
 ### ⚡ Performance

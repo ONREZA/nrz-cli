@@ -358,10 +358,15 @@ impl TransferProvider {
                 if reconcile().await? == PublicationOutcome::Published {
                     return Ok(PublicationOutcome::Published);
                 }
-                // ACTIVE is not terminal. Never renew the original transport budget.
-                if resumable && failures < 4 {
+                // ACTIVE permits the same owner's continuation, without renewing its deadline or fast retries.
+                if resumable {
                     attaching = true;
-                    tokio::time::sleep(Duration::from_millis(100u64 << (failures - 1))).await;
+                    let delay = if failures < 4 {
+                        Duration::from_millis(100u64 << (failures - 1))
+                    } else {
+                        Duration::from_secs(5)
+                    };
+                    tokio::time::sleep(delay).await;
                     break;
                 }
                 tokio::time::sleep(Duration::from_secs(5)).await;

@@ -581,3 +581,50 @@ async fn active_reconciliation_never_renews_transport_budget_or_operation_deadli
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn active_reconciliation_reattaches_after_four_connection_failures() {
+    tokio::time::timeout(Duration::from_secs(14), async {
+        let receiver = receiver(wire::RESUME_ALPN).await;
+        let (provider, hash, bytes) = fixture().await;
+        let identity = provider.endpoint_id();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let reconciliations = calls.clone();
+        let opening = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(11);
+        let task = tokio::spawn(provider.publish_resume_with_reconciliation(
+            target(&receiver, hash),
+            "original-grant".into(),
+            opening,
+            deadline,
+            move || {
+                reconciliations.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { Ok(PublicationOutcome::Reconcile) }
+            },
+        ));
+        for generation in 0..4 {
+            let (connection, _control) = accept(&receiver, generation > 0).await;
+            assert_eq!(connection.remote_id().to_string(), identity);
+            connection.close(0u32.into(), b"injected retryable connection failure");
+        }
+        let exhausted_at = Instant::now();
+        let (connection, mut control) =
+            tokio::time::timeout(Duration::from_secs(7), accept(&receiver, true))
+                .await
+                .expect("ACTIVE must permit useful continuation after four transport failures");
+        assert!(Instant::now() - exhausted_at >= Duration::from_secs(5));
+        assert!(
+            Instant::now() > opening,
+            "resume must not reopen the expired grant"
+        );
+        assert!(Instant::now() < deadline);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(connection.remote_id().to_string(), identity);
+        assert_eq!(fetch(&connection, hash, 0, false).await, bytes);
+        published(&mut control, hash).await;
+        assert_eq!(task.await.unwrap().unwrap(), PublicationOutcome::Published);
+        receiver.close().await;
+    })
+    .await
+    .unwrap();
+}

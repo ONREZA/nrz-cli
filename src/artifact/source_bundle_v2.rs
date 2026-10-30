@@ -57,9 +57,8 @@ pub(crate) fn freeze_source_bundle(
                 nrz_runtime_artifact::source_layer_launch_for_target(Some(runtime), Some(target))?;
             let family = match launch.profile {
                 nrz_runtime_artifact::RuntimeProfile::Bun => "BUN",
-                nrz_runtime_artifact::RuntimeProfile::Node22
-                | nrz_runtime_artifact::RuntimeProfile::Node24
-                | nrz_runtime_artifact::RuntimeProfile::Node26 => "NODE",
+                nrz_runtime_artifact::RuntimeProfile::NodeAny
+                | nrz_runtime_artifact::RuntimeProfile::Node(_) => "NODE",
                 _ => anyhow::bail!(
                     "Source V2 requires an explicit application runtime for this launcher"
                 ),

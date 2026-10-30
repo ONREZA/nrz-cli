@@ -124,10 +124,42 @@ pub(crate) async fn manifest_build_runtime_target(
     )
     .await?;
     let fresh_platform_target = if platform_runner
+        && declaration.is_some()
         && effective.primary_runtime_rebuilt()
         && effective.application_runtime_target().is_none()
     {
         Some(selected_platform_target()?)
+    } else {
+        None
+    };
+    let implicit_platform_bun_target = if platform_runner
+        && declaration.is_none()
+        && effective.primary_runtime_rebuilt()
+        && effective.application_runtime_target().is_none()
+        && matches!(runtime.runtime_type, RuntimeType::Bun | RuntimeType::Static)
+        && needs_local_bun_target(runtime, manifest, None)
+        && manifest.layers.iter().any(|layer| {
+            layer.target == crate::build::manifest::LayerTarget::Compute
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_none()
+        }) {
+        Some(
+            if effective
+                .platform_source_build_context()
+                .is_some_and(|context| {
+                    context.build_toolchain.family == nrz_source_bundle::BuildToolchainFamily::Bun
+                })
+            {
+                // Pre-build qualification already checked this exact compiler target.
+                std::env::var("ONREZA_BUILD_RUNTIME_VERSION")
+                    .context("trusted Bun compiler target is missing")?
+            } else {
+                measured_bun_target(environment).await?
+            },
+        )
     } else {
         None
     };
@@ -145,6 +177,7 @@ pub(crate) async fn manifest_build_runtime_target(
                         && needs_local_bun_target(runtime, manifest, declaration))
             })
             .or(fresh_platform_target.as_deref())
+            .or(implicit_platform_bun_target.as_deref())
             .or(local_bun_target.as_deref()),
         Some(manifest),
         declaration,

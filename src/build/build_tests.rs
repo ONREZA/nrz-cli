@@ -44,6 +44,17 @@ pub(super) fn assert_static_server_routes(
     assert_eq!(manifest.routes[2].pattern, "^/.*$");
     assert_eq!(manifest.routes[2].layer, "server");
     assert_eq!(manifest.routes[2].priority, Some(0));
+
+    let serialized = serde_json::to_value(manifest).unwrap();
+    let contract: nrz_contract::manifest::OnrezaBuildOutputManifest =
+        serde_json::from_value(serialized.clone()).unwrap();
+    let frozen: nrz_api::MetadatumRequestBodyManifest =
+        serde_json::from_value(serde_json::to_value(contract).unwrap()).unwrap();
+    for wire in [serialized, serde_json::to_value(frozen).unwrap()] {
+        assert_eq!(wire["routes"][1]["fallthrough"], true);
+        assert!(wire["routes"][0].get("fallthrough").is_none());
+        assert!(wire["routes"][2].get("fallthrough").is_none());
+    }
 }
 
 fn make_ssr_detection(framework: &str, feature: &str) -> crate::detect::types::DetectionResult {
@@ -323,6 +334,47 @@ fn framework_dir_wins_over_output_directory_hint() {
     )
     .unwrap();
     assert_eq!(found.file_name().unwrap(), ".next");
+}
+
+#[test]
+fn frozen_runner_output_preserves_matching_authored_express_root() {
+    let dir = tempfile::tempdir().unwrap();
+    write_build_file(
+        dir.path(),
+        "onreza.toml",
+        "[build]\noutput_directory = 'dist'\n[deploy]\nentry = 'app/cloud.mjs'\n",
+    );
+    write_build_file(dir.path(), "dist/app/cloud.mjs", "export {};\n");
+    let config = nrz::config::load(dir.path()).unwrap();
+    let mut effective =
+        nrz::config::EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+    effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+        framework_preset: Some("express".into()),
+        output_directory: Some("dist".into()),
+        output_directory_source: Some(BuildSettingSource::Preset),
+        ..Default::default()
+    });
+    let setting = effective.output_directory().unwrap();
+    let detection = make_detection("express", None);
+    let (output, _) = detect_output_dir_for_framework(
+        dir.path(),
+        &effective.output_dirs(),
+        &compute_aware_output_dirs(&detection),
+        Some(output_hint(
+            setting.value().unwrap(),
+            setting.source_or_preset(),
+        )),
+        "express",
+    )
+    .unwrap();
+
+    assert_eq!(output, dir.path().join("dist").canonicalize().unwrap());
+    assert!(output.join("app/cloud.mjs").is_file());
+    assert_eq!(setting.source_or_preset(), BuildSettingSource::User);
+    assert_eq!(
+        setting.origin(),
+        nrz::config::EffectiveSettingOrigin::LocalConfig
+    );
 }
 
 #[test]

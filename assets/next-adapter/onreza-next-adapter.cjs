@@ -452,6 +452,51 @@ function pathnameMayMatchMiddleware(middleware, pathname) {
   })
 }
 
+function nativeRelativeUrlPath(value) {
+  return value.split(path.sep).join('/')
+}
+
+function canonicalStaticOutputs(ctx) {
+  if (path.sep !== '\\' || !Array.isArray(ctx.outputs && ctx.outputs.staticFiles)) {
+    return ctx.outputs
+  }
+  const staticDir = path.resolve(ctx.projectDir, ctx.distDir, 'static')
+  const basePath =
+    typeof ctx.config?.basePath === 'string' && ctx.config.basePath !== '/'
+      ? ctx.config.basePath
+      : ''
+  const prefix = `${basePath}/_next/static`
+  return {
+    ...ctx.outputs,
+    staticFiles: ctx.outputs.staticFiles.map((output) => {
+      if (
+        !output ||
+        typeof output.pathname !== 'string' ||
+        typeof output.filePath !== 'string' ||
+        !output.pathname.startsWith(`${prefix}/`) ||
+        !output.pathname.includes(path.sep)
+      ) {
+        return output
+      }
+      const relative = path.relative(staticDir, path.resolve(ctx.projectDir, output.filePath))
+      if (
+        path.isAbsolute(relative) ||
+        relative.split(path.sep).some((segment) => !segment || segment === '.' || segment === '..')
+      ) {
+        return output
+      }
+      // Next joins a native recursive path to a POSIX URL without converting separators.
+      if (
+        output.pathname !== path.posix.join(prefix, relative) &&
+        output.pathname !== path.posix.join(prefix, path.sep + relative)
+      ) {
+        return output
+      }
+      return { ...output, pathname: path.posix.join(prefix, nativeRelativeUrlPath(relative)) }
+    }),
+  }
+}
+
 function collectPublicPathnames(projectDir) {
   const publicDir = path.join(projectDir, 'public')
   if (!fs.existsSync(publicDir)) {
@@ -474,7 +519,7 @@ function collectPublicPathnames(projectDir) {
       if (!entry.isFile()) {
         continue
       }
-      const rel = path.relative(publicDir, fullPath).split(path.sep).join('/')
+      const rel = nativeRelativeUrlPath(path.relative(publicDir, fullPath))
       pathnames.push(`/${rel}`)
     }
   }
@@ -638,7 +683,7 @@ const adapter = {
 
   async onBuildComplete(ctx) {
     await ensureStandaloneServerTraces(ctx)
-    writeDescriptor(ctx)
+    writeDescriptor({ ...ctx, outputs: canonicalStaticOutputs(ctx) })
   },
 }
 

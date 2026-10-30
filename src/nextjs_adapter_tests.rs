@@ -1678,3 +1678,91 @@ fn static_file_mapping_rejects_path_traversal() {
 
     assert!(error.to_string().contains("unsafe Next.js static pathname"));
 }
+
+#[test]
+fn adapter_canonicalizes_windows_static_urls_without_reinterpreting_posix_names() {
+    let script = r#"
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+async function descriptorFor(pathApi, literalBackslash = false, outside = false, basePath = '') {
+  let descriptor;
+  const sandbox = {
+    module: { exports: {} }, process: { env: {} },
+    require(name) {
+      if (name === 'path') return pathApi;
+      if (name === 'fs') return {
+        existsSync: () => false, mkdirSync() {},
+        writeFileSync(_name, data) { descriptor = JSON.parse(data); },
+      };
+      throw new Error(`unexpected require ${name}`);
+    },
+  };
+  vm.runInNewContext(source, sandbox);
+  const projectDir = pathApi === path.win32 ? 'C:\\project' : '/project';
+  const distDir = pathApi.join(projectDir, '.next');
+  const staticDir = pathApi.join(distDir, 'static');
+  const filePath = outside
+    ? pathApi.join(distDir, 'outside.js')
+    : pathApi.join(staticDir, literalBackslash ? 'chunks\\literal.js' : 'chunks', '17.js');
+  // Reproduce Next's native recursive pathname followed by its POSIX URL join.
+  const relative = pathApi.sep + pathApi.relative(staticDir, filePath);
+  const pathname = basePath + path.posix.join('/_next/static', relative);
+  await sandbox.module.exports.onBuildComplete({
+    projectDir, repoRoot: projectDir, distDir, config: { basePath }, routing: {},
+    outputs: { staticFiles: [{ pathname, filePath }] },
+  });
+  return { original: pathname, filePath, descriptor };
+}
+(async () => {
+  process.stdout.write(JSON.stringify({
+    windows: await descriptorFor(path.win32),
+    posix: await descriptorFor(path.posix),
+    windowsBase: await descriptorFor(path.win32, false, false, '/docs'),
+    posixBase: await descriptorFor(path.posix, false, false, '/docs'),
+    posixLiteral: await descriptorFor(path.posix, true),
+    outside: await descriptorFor(path.win32, false, true),
+  }));
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"#;
+    let adapter_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets/next-adapter/onreza-next-adapter.cjs");
+    let output = std::process::Command::new("node")
+        .args(["-e", script, adapter_path.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    for (name, expected) in [
+        ("windows", "/_next/static/chunks/17.js"),
+        ("posix", "/_next/static/chunks/17.js"),
+        ("windowsBase", "/docs/_next/static/chunks/17.js"),
+        ("posixBase", "/docs/_next/static/chunks/17.js"),
+    ] {
+        let file = &result[name]["descriptor"]["outputs"]["staticFiles"][0];
+        let pathname = file["pathname"].as_str().unwrap();
+        assert_eq!(pathname, expected, "{name}");
+        assert_eq!(file["filePath"], result[name]["filePath"]);
+        assert_eq!(
+            outputs::pathname_to_relative_archive_path(pathname).unwrap(),
+            expected.strip_prefix('/').unwrap()
+        );
+        assert_eq!(
+            result[name]["descriptor"]["deploymentHints"]["middleware"]["staticFiles"]["safeForStaticLayer"]
+                [0],
+            pathname
+        );
+    }
+    for name in ["posixLiteral", "outside"] {
+        let pathname = result[name]["descriptor"]["outputs"]["staticFiles"][0]["pathname"]
+            .as_str()
+            .unwrap();
+        assert_eq!(pathname, result[name]["original"].as_str().unwrap());
+        assert!(outputs::pathname_to_relative_archive_path(pathname).is_err());
+    }
+}
