@@ -996,7 +996,10 @@ pub(super) fn is_node_project_runtime_framework(framework: &str) -> bool {
     }
     // These adapters emit Node entrypoints that still resolve packages from the
     // installed project runtime instead of producing a self-contained output.
-    if matches!(framework, "astro" | "sveltekit" | "remix" | "react-router") {
+    if matches!(
+        framework,
+        "astro" | "sveltekit" | "remix" | "react-router" | "tanstack-start"
+    ) {
         return true;
     }
     if framework == "other" {

@@ -753,3 +753,162 @@ async fn fresh_typed_output_without_source_launch_needs_no_trusted_serving_targe
         }
     }
 }
+
+#[tokio::test]
+async fn platform_implicit_bun_output_keeps_qualified_compiler_target_without_source_launch() {
+    const CASE: &str = "ONREZA_IMPLICIT_BUN_OUTPUT_TEST";
+    if std::env::var_os(CASE).is_none() {
+        let bun = measured_bun_target(&[]).await.unwrap();
+        for compiler in ["BUN", "NODE"] {
+            let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "deploy::application_runtime::tests::platform_implicit_bun_output_keeps_qualified_compiler_target_without_source_launch", "--nocapture"])
+            .env(CASE, compiler)
+            .env("ONREZA_BUILD_RUNTIME_VERSION", if compiler == "BUN" { &bun } else { "node-24" })
+            .env("ONREZA_IMPLICIT_BUN_EXPECTED_TARGET", &bun)
+            .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
+            .env("ONREZA_BUILD_NODE_MAJOR", "24")
+            .env("ONREZA_RUNTIME_VERSION", "node-24")
+            .output()
+            .await
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        return;
+    }
+    let compiler = std::env::var(CASE).unwrap();
+    let original: SourceBuildContext = serde_json::from_value(json!({
+        "schemaVersion": 1, "buildToolchain": {"family": compiler}, "applicationRuntime": null
+    }))
+    .unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.toolchain = Some(original.build_toolchain.family);
+    let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+        std::path::PathBuf::from("."),
+        config,
+    );
+    effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+        source_build_context: Some(original.clone()),
+        node_version: Some("NODE_24".into()),
+        ..Default::default()
+    });
+    let resolved =
+        validate_application_runtime_before_build(&original, &effective, true, true, &[])
+            .await
+            .unwrap();
+    assert_eq!(resolved.context, original);
+    assert!(resolved.application_target.is_none());
+    effective.bind_resolved_platform_context(
+        resolved.context,
+        resolved.application_target,
+        resolved.node_version,
+    );
+    effective.mark_primary_runtime_rebuilt();
+    let runtime = RuntimeInfo {
+        runtime_type: RuntimeType::Bun,
+        version: None,
+    };
+    let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
+    // The compiler was already qualified; binding output must not probe it again.
+    let unavailable = vec![("PATH".into(), "/nonexistent-implicit-bun-test".into())];
+    let target = manifest_build_runtime_target(
+        &runtime,
+        &effective,
+        &manifest,
+        None,
+        if compiler == "BUN" { &unavailable } else { &[] },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        target,
+        Some(std::env::var("ONREZA_IMPLICIT_BUN_EXPECTED_TARGET").unwrap())
+    );
+    crate::deploy::apply_rebuilt_application_runtime_manifest(
+        &mut manifest,
+        None,
+        target.as_deref(),
+        "tanstack-start",
+    )
+    .unwrap();
+    assert_eq!(
+        manifest.layers[0]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .build_runtime_version,
+        target
+    );
+    assert!(
+        manifest.layers[0]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .application_runtime
+            .is_none()
+    );
+    assert_eq!(effective.platform_source_build_context(), Some(&original));
+    assert_eq!(effective.node_version(), Some("NODE_24"));
+
+    let node = RuntimeInfo {
+        runtime_type: RuntimeType::Node,
+        version: None,
+    };
+    let untyped = crate::build::manifest::generate_compute_manifest("server.js");
+    assert_eq!(
+        manifest_build_runtime_target(&node, &effective, &untyped, None, &unavailable)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("node")
+    );
+    let mut siblings = crate::build::manifest::generate_compute_manifest("server.js");
+    let mut second = untyped.layers[0].clone();
+    second.name = "second".into();
+    second.entry = Some("second.js".into());
+    siblings.layers.push(second);
+    assert!(
+        manifest_build_runtime_target(&runtime, &effective, &siblings, None, &unavailable)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    for family in [
+        ApplicationRuntimeFamily::Node,
+        ApplicationRuntimeFamily::Bun,
+    ] {
+        let mut retained = crate::build::manifest::generate_compute_manifest("server.js");
+        let owner = retained.layers[0].runtime.as_mut().unwrap();
+        owner.application_runtime = Some(nrz_source_bundle::ApplicationRuntimeIntent {
+            family,
+            args: vec![],
+        });
+        owner.build_runtime_version = Some(
+            if family == ApplicationRuntimeFamily::Node {
+                "node-22"
+            } else {
+                "bun-1.4.2"
+            }
+            .into(),
+        );
+        let before = serde_json::to_value(&retained).unwrap();
+        let selected =
+            manifest_build_runtime_target(&runtime, &effective, &retained, None, &unavailable)
+                .await
+                .unwrap();
+        assert!(selected.is_none());
+        crate::deploy::apply_rebuilt_application_runtime_manifest(
+            &mut retained,
+            None,
+            selected.as_deref(),
+            "other",
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_value(retained).unwrap(), before);
+    }
+}
