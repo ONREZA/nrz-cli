@@ -4,10 +4,10 @@
   "private": true,
   "description": "DEPRECATED: incident-only canary; remove after built-output Git deployment acceptance",
   "scripts": {
-    "build": "node build.js",
-    "start": "node dist/app/cloud.mjs"
+    "build": "bun build.js"
   },
   "dependencies": {
     "express": "5.1.0"
-  }
+  },
+  "packageManager": "bun@1.4.4"
 }

@@ -1,9 +1,10 @@
 # DEPRECATED: Incident-only built Node canary; remove after built-output Git deployment acceptance.
+[project]
+framework = "tanstack-start"
+
 [build]
-output_directory = "dist"
+toolchain = "bun"
+output_directory = ".output"
 
 [deploy]
 compute = "process"
-runtime = "node"
-entry = "app/cloud.mjs"
-args = []
