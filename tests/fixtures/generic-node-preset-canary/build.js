@@ -75,7 +75,7 @@ try {
   console.error(JSON.stringify({ fixture: "runtime-write-canary", stage, errorCode: typeof error.code === "string" ? error.code : "CANARY_FAILED" }));
   process.exit(1);
 }
-const original = { ok: true, fixture: "generic-node-preset-canary", buildScript: true, outputDirectory: "dist", publicationCanary: "20261101-builder-recovery" };
+const original = { ok: true, fixture: "generic-node-preset-canary", buildScript: true, outputDirectory: "dist" };
 const marker = { ok: true, fixture: "runtime-write-canary", mkdir: true, overwrite: true };
 http.createServer((request, response) => {
   response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
