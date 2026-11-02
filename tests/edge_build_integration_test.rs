@@ -358,6 +358,19 @@ struct SourceV2File {
     role: String,
 }
 
+fn assert_server_runtime<'a>(
+    manifest: &'a SourceV2Manifest,
+    target: &str,
+) -> &'a serde_json::Value {
+    assert_eq!(manifest.layers.len(), 1);
+    let layer = &manifest.layers[0];
+    assert_eq!(layer.target, "COMPUTE");
+    assert_eq!(layer.entrypoint.as_deref(), Some("server.js"));
+    let runtime = layer.runtime_config.as_ref().unwrap();
+    assert_eq!(runtime["buildRuntimeVersion"], target);
+    runtime
+}
+
 fn source_bundle_manifest(
     output: &std::path::Path,
     cli_output: &std::process::Output,
@@ -844,12 +857,7 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
             deployment_id,
             target,
         );
-        assert_eq!(manifest.layers.len(), 1);
-        let layer = &manifest.layers[0];
-        assert_eq!(layer.target, "COMPUTE");
-        assert_eq!(layer.entrypoint.as_deref(), Some("server.js"));
-        let runtime = layer.runtime_config.as_ref().unwrap();
-        assert_eq!(runtime["buildRuntimeVersion"], target);
+        let runtime = assert_server_runtime(&manifest, target);
         assert!(runtime.get("runtimePolicyLineage").is_none());
         let expected_intent = if frozen_runtime.is_null() {
             json!({"family":"NODE","args":[]})
@@ -883,6 +891,16 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
 #[cfg(unix)]
 #[test]
 fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_handoff() {
+    let bun = assert_cmd::Command::new("bun")
+        .arg("--version")
+        .assert()
+        .success();
+    let target = format!(
+        "bun-{}",
+        std::str::from_utf8(&bun.get_output().stdout)
+            .unwrap()
+            .trim()
+    );
     for (frozen_runtime, explicit_static) in [
         (
             json!({"family":"NODE","entry":"server.js","args":[]}),
@@ -935,9 +953,26 @@ fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_h
         .env("ONREZA_RUNTIME_VERSION", "node-24")
         .output()
         .unwrap();
+        assert!(project.path().join("build-completed").exists());
+        assert!(!project.path().join("package_temp.json").exists());
         if explicit_static {
-            successful_handoff(&output, "explicit static elysia");
-            assert!(output_dir.path().join("source-manifest-v2.json").exists());
+            let manifest =
+                source_bundle_manifest(output_dir.path(), &output, "explicit static elysia");
+            assert!(manifest.layers.iter().all(|layer| layer.target == "STATIC"));
+            assert!(manifest.files.iter().all(|file| file.role != "compute"));
+            continue;
+        }
+        if frozen_runtime.is_null() {
+            let manifest = source_bundle_manifest(
+                output_dir.path(),
+                &output,
+                "implicit bun elysia with node compiler",
+            );
+            let runtime = assert_server_runtime(&manifest, &target);
+            let launch =
+                nrz_runtime_artifact::source_layer_launch_for_target(Some(runtime), Some(&target))
+                    .unwrap();
+            assert_eq!(launch.profile, nrz_runtime_artifact::RuntimeProfile::Bun);
             continue;
         }
         assert!(!output.status.success());
@@ -947,15 +982,9 @@ fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_h
             result["error"]
                 .as_str()
                 .unwrap()
-                .contains(if frozen_runtime.is_null() {
-                    "requires a retained or admitted Bun build target"
-                } else {
-                    "conflicts with framework elysia"
-                }),
+                .contains("conflicts with framework elysia"),
             "{result}"
         );
-        assert!(project.path().join("build-completed").exists());
-        assert!(!project.path().join("package_temp.json").exists());
         assert!(!output_dir.path().join("source-bundle-v1.tar.zst").exists());
         assert!(!output_dir.path().join("source-manifest-v2.json").exists());
         assert!(

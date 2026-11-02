@@ -9,6 +9,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+fn assert_shared_library_provider(bytes: &[u8]) {
+    assert!(Elf::parse(bytes).unwrap().interpreter.is_none());
+    let mut input = super::NativeInput::new(std::io::Cursor::new(bytes), bytes.len() as u64);
+    let mut budget = super::standalone_budget(bytes.len());
+    let elf = super::parse_loader_elf(&mut input, &mut budget).unwrap();
+    super::inspect_elf(&elf, bytes.len() as u64, false, &mut budget).unwrap();
+}
+
 #[test]
 fn qualified_system_paths_use_unix_loader_components() {
     for path in ["/lib", "/lib64", "/usr/lib/x86_64-linux-gnu", "/usr/lib64"] {
@@ -186,6 +194,33 @@ fn bounded_native_closure_rejects_oversized_regular_files_before_reading() {
 }
 
 #[test]
+fn streamed_native_closure_rejects_same_size_named_replacement_after_digest() {
+    let artifact = Artifact::new();
+    let bytes = versioned_elf(None, None, None, true);
+    std::fs::write(artifact.0.join("server"), &bytes).unwrap();
+    let root = ArtifactRoot::open(&artifact.0).unwrap();
+    let mut budget = super::standalone_budget(bytes.len());
+    let error = NativeExecutableRequirements::verify_rooted_artifact_closure_streamed(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        &mut budget,
+        |_, length, digest| {
+            assert_eq!(length, bytes.len() as u64);
+            assert_eq!(digest, blake3::hash(&bytes));
+            std::fs::rename(artifact.0.join("server"), artifact.0.join("original")).unwrap();
+            std::fs::write(artifact.0.join("server"), &bytes).unwrap();
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("native closure file changed"),
+        "{error}"
+    );
+}
+
+#[test]
 fn bounded_native_closure_charges_entry_and_every_provider_read() {
     let artifact = Artifact::new();
     std::fs::create_dir(artifact.0.join("lib")).unwrap();
@@ -205,45 +240,65 @@ fn bounded_native_closure_charges_entry_and_every_provider_read() {
     )
     .unwrap();
     let root = ArtifactRoot::open(&artifact.0).unwrap();
-    for (total_limit, reads, accepted) in [
-        (4095, 0, false),
-        (8191, 1, false),
-        (12287, 2, false),
-        (12288, 3, true),
-    ] {
-        let mut budget = NativeClosureReadBudget::new(NativeClosureReadLimits {
-            max_metadata_bytes: super::DEFAULT_NATIVE_METADATA_BYTES,
-            max_file_bytes: 4096,
-            max_total_bytes: total_limit,
-        });
-        let mut checked = Vec::new();
-        let result = NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
-            &root,
-            Path::new("server"),
-            Path::new(""),
-            &mut budget,
-            |path, bytes| {
-                checked.push(path.to_owned());
-                assert_eq!(bytes.len(), 4096);
-                Ok(())
-            },
-        );
-        assert_eq!(checked.len(), reads);
-        assert_eq!(budget.used_bytes(), reads as u64 * 4096);
-        if accepted {
-            let (_, members) = result.unwrap();
-            assert_eq!(members, [Path::new("lib/libfoo.so"), Path::new("server")]);
-            assert_eq!(
-                checked,
-                ["server", "lib/libfoo.so", "lib/libfoo.so"].map(PathBuf::from)
-            );
-        } else {
-            assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("aggregate byte limit")
-            );
+    for streamed in [false, true] {
+        for (total_limit, reads, accepted) in [
+            (4095, 0, false),
+            (8191, 1, false),
+            (12287, 2, false),
+            (12288, 3, true),
+        ] {
+            let mut budget = NativeClosureReadBudget::new(NativeClosureReadLimits {
+                max_metadata_bytes: super::DEFAULT_NATIVE_METADATA_BYTES,
+                max_file_bytes: 4096,
+                max_total_bytes: total_limit,
+            });
+            let mut checked = Vec::new();
+            let result = if streamed {
+                NativeExecutableRequirements::verify_rooted_artifact_closure_streamed(
+                    &root,
+                    Path::new("server"),
+                    Path::new(""),
+                    &mut budget,
+                    |path, length, digest| {
+                        checked.push(path.to_owned());
+                        assert_eq!(length, 4096);
+                        assert_eq!(
+                            digest,
+                            blake3::hash(&std::fs::read(artifact.0.join(path)).unwrap())
+                        );
+                        Ok(())
+                    },
+                )
+            } else {
+                NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+                    &root,
+                    Path::new("server"),
+                    Path::new(""),
+                    &mut budget,
+                    |path, bytes| {
+                        checked.push(path.to_owned());
+                        assert_eq!(bytes.len(), 4096);
+                        Ok(())
+                    },
+                )
+            };
+            assert_eq!(checked.len(), reads);
+            assert_eq!(budget.used_bytes(), reads as u64 * 4096);
+            if accepted {
+                let (_, members) = result.unwrap();
+                assert_eq!(members, [Path::new("lib/libfoo.so"), Path::new("server")]);
+                assert_eq!(
+                    checked,
+                    ["server", "lib/libfoo.so", "lib/libfoo.so"].map(PathBuf::from)
+                );
+            } else {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("aggregate byte limit")
+                );
+            }
         }
     }
 }
@@ -809,15 +864,7 @@ fn dynamic_entry_requires_an_interpreter_while_shared_providers_do_not() {
     }
 
     let provider = versioned_elf(Some(("libc.so.6", "GLIBC_2.2.5")), None, None, false);
-    let elf = Elf::parse(&provider).unwrap();
-    assert!(elf.interpreter.is_none());
-    super::inspect_elf(
-        &elf,
-        &provider,
-        false,
-        &mut super::standalone_budget(provider.len()),
-    )
-    .unwrap();
+    assert_shared_library_provider(&provider);
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
@@ -900,15 +947,8 @@ fn real_native_entry_interpreter_qualification() {
     }
     let provider = std::fs::read(root.join("lib/libanswer.so")).unwrap();
     let elf = Elf::parse(&provider).unwrap();
-    assert!(elf.interpreter.is_none());
     assert!(elf.libraries.contains(&"libc.so.6"));
-    super::inspect_elf(
-        &elf,
-        &provider,
-        false,
-        &mut super::standalone_budget(provider.len()),
-    )
-    .unwrap();
+    assert_shared_library_provider(&provider);
 
     // The first loader header is authoritative to Linux; goblin's optional
     // interpreter value alone can hide duplicate or truncated loader metadata.
@@ -1201,17 +1241,21 @@ fn qualified_compute_system_library_versions_match_baseline() {
     let mut actual = BTreeMap::new();
     for library in NativeExecutableRequirements::QUALIFIED_SYSTEM_LIBRARIES {
         let bytes = std::fs::read(root.join(library)).unwrap();
-        let elf = Elf::parse(&bytes).unwrap();
+        assert!(Elf::parse(&bytes).is_ok());
+        let mut input = super::NativeInput::new(std::io::Cursor::new(&bytes), bytes.len() as u64);
+        let elf = super::parse_loader_elf(&mut input, &mut super::standalone_budget(bytes.len()))
+            .unwrap();
         super::inspect_elf(
             &elf,
-            &bytes,
+            bytes.len() as u64,
             false,
             &mut super::standalone_budget(bytes.len()),
         )
         .unwrap();
         actual.insert(
             (*library).to_owned(),
-            version_definitions(&elf, &bytes, &mut super::standalone_budget(bytes.len())).unwrap(),
+            version_definitions(&elf, &mut input, &mut super::standalone_budget(bytes.len()))
+                .unwrap(),
         );
     }
     if let Some(output) = std::env::var_os("NRZ_NATIVE_SYSTEM_LIBRARY_VERSIONS_OUTPUT") {

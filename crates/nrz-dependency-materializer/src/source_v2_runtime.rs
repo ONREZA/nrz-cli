@@ -41,9 +41,9 @@ pub struct RuntimeVerificationLimits {
     /// Reserve independently of max_native_file_bytes, retained manifests and
     /// the caller's path index/Python reachability state; this is not total RSS.
     pub max_metadata_bytes: u64,
-    /// Maximum bytes buffered for one ELF entry/provider read.
+    /// Maximum file size admitted for one streamed ELF entry/provider read.
     pub max_native_file_bytes: u64,
-    /// Cumulative actual ELF reads across every layer, including provider rereads.
+    /// Cumulative complete ELF bytes hashed across layers, including provider rereads.
     pub max_native_total_bytes: u64,
     /// Bounds path-index nodes and reachability entries; not a RAM reservation.
     pub max_path_nodes: u64,
@@ -70,9 +70,7 @@ impl RuntimeVerificationLimits {
         let pending = max_files.checked_mul(
             MAX_MANAGED_CONTEXTS * 2 * std::mem::size_of::<(usize, ManagedContext)>() as u64,
         )?;
-        self.max_native_file_bytes
-            .min(self.max_native_total_bytes)
-            .max(ADDON_HEADER_BYTES as u64)
+        nrz_runtime_artifact::NATIVE_STREAM_WORKING_MEMORY_BYTES
             .checked_add(self.max_metadata_bytes)?
             .checked_add(SourceArchivePathIndex::working_memory_bytes(
                 self.max_path_nodes,
@@ -253,17 +251,17 @@ pub(crate) fn verify_prepared_source_v2_runtime(
         if !matches!(file, FileEntry::File { .. }) {
             return invalid("native entry must be a declared regular file");
         }
-        let (_, members) = NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+        let (_, members) = NativeExecutableRequirements::verify_rooted_artifact_closure_streamed(
             &source.root,
             Path::new(&entry.0),
             Path::new(layer.root_path.as_ref().map_or(".", |root| &root.0)),
             &mut native_budget,
-            |path, bytes| {
+            |path, length, digest| {
                 let file = path.to_str().and_then(|path| find_file(source, path));
                 if file.is_some_and(|file| {
                     matches!(file, FileEntry::File { size, blob_digest, .. }
-                        if *size == bytes.len() as u64
-                            && blob_digest.value == blake3::hash(bytes).to_hex().as_str())
+                        if *size == length
+                            && blob_digest.value == digest.to_hex().as_str())
                         && owns_compute_file(file, &layer.name.0)
                 }) {
                     Ok(())

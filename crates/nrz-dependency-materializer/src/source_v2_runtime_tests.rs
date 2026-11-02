@@ -18,6 +18,17 @@ fn limits() -> RuntimeVerificationLimits {
 }
 
 #[test]
+fn streamed_runtime_working_allowance_does_not_reserve_the_ten_gib_file_limit() {
+    let mut profile = limits();
+    let small = profile.working_memory_bytes(100_000, 4096).unwrap();
+    profile.max_native_file_bytes = 10 * 1024 * 1024 * 1024;
+    profile.max_native_total_bytes = profile.max_native_file_bytes;
+    assert_eq!(profile.working_memory_bytes(100_000, 4096).unwrap(), small);
+    profile.max_native_total_bytes = 1;
+    assert_eq!(profile.working_memory_bytes(100_000, 4096).unwrap(), small);
+}
+
+#[test]
 fn runtime_working_allowance_funds_native_index_and_managed_growth_separately() {
     use std::collections::HashSet;
     let contexts = [
@@ -69,10 +80,7 @@ fn runtime_working_allowance_funds_native_index_and_managed_growth_separately() 
         let declared = profile.working_memory_bytes(files, 4096).unwrap();
         assert!(
             declared
-                >= profile
-                    .max_native_file_bytes
-                    .min(profile.max_native_total_bytes)
-                    .max(ADDON_HEADER_BYTES as u64)
+                >= nrz_runtime_artifact::NATIVE_STREAM_WORKING_MEMORY_BYTES
                     + profile.max_metadata_bytes
                     + index
                     + managed as u64

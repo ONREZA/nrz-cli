@@ -148,3 +148,115 @@ fn loader_metadata_does_not_index_unused_or_zero_padded_string_tables() {
     );
     eprintln!("actual cumulative allocations: eager={eager_bytes}, loader={loader_bytes}");
 }
+
+#[test]
+fn streamed_large_elf_has_bounded_heap_and_checks_its_complete_identity() {
+    use nrz_runtime_artifact::{
+        ArtifactRoot, NativeClosureReadBudget, NativeClosureReadLimits,
+        NativeExecutableRequirements,
+    };
+    use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
+    let root = tempfile::tempdir_in("/var/tmp").unwrap();
+    let path = root.path().join("server");
+    let mut file = std::fs::File::create(&path).unwrap();
+    let length = 64_u64 * 1024 * 1024;
+    let mut header = elf(62, None);
+    header[96..104].copy_from_slice(&length.to_le_bytes());
+    header[104..112].copy_from_slice(&length.to_le_bytes());
+    header[56..58].copy_from_slice(&2_u16.to_le_bytes());
+    header[120..124].copy_from_slice(&goblin::elf::program_header::PT_DYNAMIC.to_le_bytes());
+    header[128..136].copy_from_slice(&512_u64.to_le_bytes());
+    header[152..160].copy_from_slice(&(length - 512).to_le_bytes());
+    file.write_all(&header).unwrap();
+    for (tag, value) in [
+        (goblin::elf::dynamic::DT_STRTAB, 0x400400),
+        (goblin::elf::dynamic::DT_STRSZ, length / 2),
+        (goblin::elf::dynamic::DT_NULL, 0),
+    ] {
+        file.write_all(&tag.to_le_bytes()).unwrap();
+        file.write_all(&value.to_le_bytes()).unwrap();
+    }
+    file.set_len(length).unwrap();
+    // The final byte is outside consumed loader metadata; its identity still matters.
+    file.seek(SeekFrom::End(-1)).unwrap();
+    file.write_all(b"x").unwrap();
+    drop(file);
+    let mut expected = blake3::Hasher::new();
+    let mut file = std::fs::File::open(&path).unwrap();
+    let mut chunk = vec![0; 64 * 1024];
+    loop {
+        let count = file.read(&mut chunk).unwrap();
+        if count == 0 {
+            break;
+        }
+        expected.update(&chunk[..count]);
+    }
+    let expected = expected.finalize();
+    let acquired = ArtifactRoot::open(root.path()).unwrap();
+    let limits = NativeClosureReadLimits {
+        max_file_bytes: 10 * 1024 * 1024 * 1024,
+        max_total_bytes: 10 * 1024 * 1024 * 1024,
+        max_metadata_bytes: 1024 * 1024,
+    };
+    let mut budget = NativeClosureReadBudget::new(limits);
+    let (result, allocated) = measure(|| {
+        NativeExecutableRequirements::verify_rooted_artifact_closure_streamed(
+            &acquired,
+            std::path::Path::new("server"),
+            std::path::Path::new(""),
+            &mut budget,
+            |_, actual_length, digest| {
+                assert_eq!(actual_length, length);
+                assert_eq!(digest, expected);
+                Ok(())
+            },
+        )
+    });
+    result.unwrap();
+    assert_eq!(budget.used_bytes(), length);
+    assert!(
+        allocated < 256 * 1024,
+        "streamed {length} bytes allocated {allocated} heap bytes"
+    );
+    eprintln!("streamed native bytes={length}, cumulative allocated={allocated}");
+    let mut budget = NativeClosureReadBudget::new(limits);
+    let error = NativeExecutableRequirements::verify_rooted_artifact_closure_streamed(
+        &acquired,
+        std::path::Path::new("server"),
+        std::path::Path::new(""),
+        &mut budget,
+        |_, _, digest| {
+            assert_eq!(digest, expected);
+            let mut changed = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            changed.seek(SeekFrom::End(-1)).unwrap();
+            changed.write_all(b"y").unwrap();
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("changed during identity verification"),
+        "{error}"
+    );
+    // Oversized10GiB input still refuses before the callback or parser starts.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(limits.max_file_bytes + 1)
+        .unwrap();
+    let mut budget = NativeClosureReadBudget::new(limits);
+    assert!(
+        NativeExecutableRequirements::verify_rooted_artifact_closure_streamed(
+            &acquired,
+            std::path::Path::new("server"),
+            std::path::Path::new(""),
+            &mut budget,
+            |_, _, _| panic!("oversized input reached hashing callback"),
+        )
+        .is_err()
+    );
+    assert_eq!(budget.used_bytes(), 0);
+}
