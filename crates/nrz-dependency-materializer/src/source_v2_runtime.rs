@@ -101,7 +101,7 @@ pub enum RuntimeVerificationError {
 
 type Result<T> = std::result::Result<T, RuntimeVerificationError>;
 
-const MAX_MANAGED_CONTEXTS: u64 = 10;
+const MAX_MANAGED_CONTEXTS: u64 = 11;
 const ADDON_HEADER_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -110,6 +110,7 @@ enum ManagedContext {
     Unlabelled,
     Conflicting,
     LinuxX64,
+    LinuxArm,
     LinuxArm64,
     DarwinX64,
     DarwinArm64,
@@ -128,7 +129,7 @@ impl ManagedContext {
             for token in component.split(['-', '_', '.']) {
                 let selected = match token {
                     "linux" | "darwin" | "win32" => &mut operating_system,
-                    "x64" | "arm64" | "ia32" => &mut architecture,
+                    "x64" | "arm" | "arm64" | "ia32" => &mut architecture,
                     _ => continue,
                 };
                 if selected.replace(token).is_some_and(|prior| prior != token) {
@@ -137,6 +138,7 @@ impl ManagedContext {
             }
             let platform = match (operating_system, architecture) {
                 (Some("linux"), Some("x64")) => Self::LinuxX64,
+                (Some("linux"), Some("arm")) => Self::LinuxArm,
                 (Some("linux"), Some("arm64")) => Self::LinuxArm64,
                 (Some("darwin"), Some("x64")) => Self::DarwinX64,
                 (Some("darwin"), Some("arm64")) => Self::DarwinArm64,
@@ -155,6 +157,7 @@ impl ManagedContext {
 
     fn foreign_platform(self) -> Option<(&'static str, &'static str)> {
         match self {
+            Self::LinuxArm => Some(("linux", "arm")),
             Self::LinuxArm64 => Some(("linux", "arm64")),
             Self::DarwinX64 => Some(("darwin", "x64")),
             Self::DarwinArm64 => Some(("darwin", "arm64")),
@@ -527,6 +530,18 @@ fn foreign_addon_header(header: &[u8], bytes: u64, platform: (&str, &str)) -> bo
     let le16 = |offset| u16::from_le_bytes(header[offset..offset + 2].try_into().unwrap());
     let le32 = |offset| u32::from_le_bytes(header[offset..offset + 4].try_into().unwrap());
     match platform {
+        ("linux", "arm") => {
+            header[..7] == *b"\x7fELF\x01\x01\x01"
+                && matches!(header[7], 0 | 3)
+                && matches!(le16(16), 1..=3)
+                && le16(18) == 40
+                && le32(20) == 1
+                && le16(40) == 52
+                && le16(42) == 32
+                && u64::from(le32(28))
+                    .checked_add(u64::from(le16(44)) * 32)
+                    .is_some_and(|end| end <= bytes)
+        }
         ("linux", "arm64") => {
             header[..7] == *b"\x7fELF\x02\x01\x01"
                 && matches!(header[7], 0 | 3)

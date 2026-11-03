@@ -36,6 +36,7 @@ fn runtime_working_allowance_funds_native_index_and_managed_growth_separately() 
         ManagedContext::Unlabelled,
         ManagedContext::Conflicting,
         ManagedContext::LinuxX64,
+        ManagedContext::LinuxArm,
         ManagedContext::LinuxArm64,
         ManagedContext::DarwinX64,
         ManagedContext::DarwinArm64,
@@ -887,6 +888,8 @@ fn trusted_javascript_addons_keep_independent_root_and_native_platform_checks() 
 #[test]
 fn labelled_foreign_addons_remain_opaque_without_weakening_host_or_alias_checks() {
     let linux = elf(false, None);
+    // Build recipe: tests/fixtures/linux-arm.c; this foreign DSO is never executed.
+    let armv7 = include_bytes!("../tests/fixtures/linux-arm.node");
     let mut arm = linux.clone();
     arm[18..20].copy_from_slice(&183u16.to_le_bytes());
     let darwin_arm = macho(0x0100_000c);
@@ -914,6 +917,10 @@ fn labelled_foreign_addons_remain_opaque_without_weakening_host_or_alias_checks(
         DependencyMaterializationKind::JavaScriptNodeModules,
     );
     let baseline = [
+        (
+            "node_modules/pkg/index.js",
+            b"module.exports = {};\n".as_slice(),
+        ),
         ("node_modules/pkg/arm64-darwin.node", darwin_arm.as_slice()),
         ("node_modules/pkg/x64-darwin.node", darwin_x64.as_slice()),
         ("node_modules/pkg/x64-win32.node", windows.as_slice()),
@@ -925,6 +932,27 @@ fn labelled_foreign_addons_remain_opaque_without_weakening_host_or_alias_checks(
         ("node_modules/pkg/x64-linux.node", linux.as_slice()),
     ];
     for (extra, payload, accepted) in [
+        (
+            "node_modules/pkg/prebuilds/linux-arm/binding.node",
+            armv7.as_slice(),
+            true,
+        ),
+        (
+            "node_modules/pkg/prebuilds/linux-arm/binding.node",
+            &armv7[..51],
+            false,
+        ),
+        ("node_modules/pkg/binding.node", armv7.as_slice(), false),
+        (
+            "node_modules/pkg/prebuilds/linux-x64/binding.node",
+            armv7.as_slice(),
+            false,
+        ),
+        (
+            "node_modules/pkg/prebuilds/linux-arm64/binding.node",
+            armv7.as_slice(),
+            false,
+        ),
         ("node_modules/pkg/binding.node", linux.as_slice(), true),
         (
             "node_modules/pkg/binding.node",
@@ -985,14 +1013,12 @@ fn labelled_foreign_addons_remain_opaque_without_weakening_host_or_alias_checks(
             Some("app"),
         ));
         let mut payloads = baseline.to_vec();
+        payloads.push(("server", b"require('./node_modules/pkg/index.js');\n"));
         payloads.push((extra, payload));
         let source = prepare(manifest("NODE", "node-24", files), &payloads);
-        assert_eq!(
-            verify_prepared_source_v2_runtime(&source, &target("node-24"), &[root], limits())
-                .is_ok(),
-            accepted,
-            "{extra}"
-        );
+        let result =
+            verify_prepared_source_v2_runtime(&source, &target("node-24"), &[root], limits());
+        assert_eq!(result.is_ok(), accepted, "{extra}: {result:?}");
     }
     let source = prepare(
         manifest(
@@ -1017,6 +1043,73 @@ fn labelled_foreign_addons_remain_opaque_without_weakening_host_or_alias_checks(
     assert!(
         verify_prepared_source_v2_runtime(&source, &target("node-24"), &[root], limits()).is_err()
     );
+    for (offset, value) in [
+        (4, 2),    // ELF64
+        (5, 2),    // Big endian
+        (6, 0),    // Invalid identity version
+        (7, 9),    // FreeBSD OSABI
+        (16, 4),   // ET_CORE
+        (18, 3),   // EM_386
+        (20, 0),   // Invalid ELF version
+        (40, 64),  // Wrong header size
+        (42, 56),  // Wrong program-header size
+        (31, 255), // Program-header table outside the file
+    ] {
+        let mut bytes = armv7.to_vec();
+        bytes[offset] = value;
+        let path = "node_modules/pkg/prebuilds/linux-arm/binding.node";
+        let source = prepare(
+            manifest(
+                "NODE",
+                "node-24",
+                vec![file(path, "dependency", Some("app"))],
+            ),
+            &[(path, &bytes)],
+        );
+        assert!(
+            verify_prepared_source_v2_runtime(&source, &target("node-24"), &[root], limits())
+                .is_err(),
+            "invalid ARM header byte {offset}"
+        );
+    }
+    for directory_alias in [false, true] {
+        for (alias, physical, accepted) in [
+            ("linux-arm", "assets/opaque", true),
+            ("linux-x64", "assets/linux-arm", false),
+            ("unlabelled", "assets/linux-arm", false),
+            ("linux-arm", "assets/linux-x64", false),
+            ("linux-arm", "assets/linux-arm64", false),
+        ] {
+            let payload = format!("{physical}/binding.node");
+            let alias_path = if directory_alias {
+                alias.to_owned()
+            } else {
+                format!("{alias}.node")
+            };
+            let source = prepare(
+                manifest(
+                    "NODE",
+                    "node-24",
+                    vec![
+                        link(
+                            &alias_path,
+                            if directory_alias { physical } else { &payload },
+                            "compute",
+                            Some("app"),
+                        ),
+                        file(&payload, "static", None),
+                    ],
+                ),
+                &[(&payload, armv7.as_slice())],
+            );
+            assert_eq!(
+                verify_prepared_source_v2_runtime(&source, &target("node-24"), &[], limits())
+                    .is_ok(),
+                accepted,
+                "alias={alias_path} physical={payload}"
+            );
+        }
+    }
 }
 
 #[test]
