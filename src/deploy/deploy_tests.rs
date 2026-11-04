@@ -76,6 +76,7 @@ mod command_tests;
 mod diagnostics_tests;
 mod framework_command_tests;
 mod health_output_tests;
+mod nitro_runtime_tests;
 mod process_entry_tests;
 mod process_output_tests;
 mod publication_tests;

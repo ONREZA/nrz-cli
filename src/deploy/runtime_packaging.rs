@@ -103,12 +103,16 @@ pub(super) fn resolve_runtime_artifact_with_manifest_source(
             .layers
             .iter()
             .any(crate::artifact::is_javascript_compute_layer);
-        let dependency_root =
-            if javascript_output_owns_dependencies(project_dir, &build_output_dir, detection) {
-                build_output_dir.clone()
-            } else {
-                select_node_project_runtime_root(workspace_root_dir, project_dir)
-            };
+        let dependency_root = if javascript_output_owns_dependencies(
+            project_dir,
+            &build_output_dir,
+            &manifest,
+            detection,
+        ) {
+            build_output_dir.clone()
+        } else {
+            select_node_project_runtime_root(workspace_root_dir, project_dir)
+        };
         let external_javascript_dependencies =
             javascript_runtime_dependency_roots(&build_output_dir, &dependency_root, &manifest)
                 .iter()
@@ -879,7 +883,7 @@ pub(super) fn plan_node_project_runtime_artifact(
     manifest: &build_manifest::Manifest,
     detection: &crate::detect::types::DetectionResult,
 ) -> Option<NodeProjectRuntimePlan> {
-    if javascript_output_owns_dependencies(project_dir, build_output_dir, detection) {
+    if javascript_output_owns_dependencies(project_dir, build_output_dir, manifest, detection) {
         return None;
     }
     let runtime_root = select_node_project_runtime_root(workspace_root_dir, project_dir);
@@ -980,22 +984,52 @@ pub(super) fn compute_layer_count(manifest: &build_manifest::Manifest) -> usize 
 fn javascript_output_owns_dependencies(
     project_dir: &Path,
     build_output_dir: &Path,
+    manifest: &build_manifest::Manifest,
     detection: &crate::detect::types::DetectionResult,
 ) -> bool {
-    matches!(
-        detection.framework.as_str(),
-        "nextjs" | "blitzjs" | "payload" | "nuxt" | "nitro"
-    ) && crate::detect::presets::framework_output_dirs(&detection.framework)
+    if !crate::detect::presets::framework_output_dirs(&detection.framework)
         .iter()
         .any(|directory| project_dir.join(directory) == build_output_dir)
+    {
+        return false;
+    }
+    if matches!(
+        detection.framework.as_str(),
+        "nextjs" | "blitzjs" | "payload" | "nuxt" | "nitro"
+    ) {
+        return true;
+    }
+    if detection.framework != "tanstack-start" || compute_layer_count(manifest) != 1 {
+        return false;
+    }
+    let Some(metadata) = std::fs::read(build_output_dir.join("nitro.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+    else {
+        return false;
+    };
+    // Nitro owns the closure only for its generated Node server entry.
+    metadata["preset"].as_str() == Some("node-server")
+        && metadata["serverEntry"].as_str() == Some("server/index.mjs")
+        && metadata["versions"]["nitro"]
+            .as_str()
+            .is_some_and(|version| !version.trim().is_empty())
+        && build_output_dir.join("server/index.mjs").is_file()
+        && manifest.layers.iter().any(|layer| {
+            crate::artifact::is_javascript_compute_layer(layer)
+                && layer.entry.as_deref().is_some_and(|entry| {
+                    join_runtime_artifact_paths(&layer.directory, entry)
+                        .is_ok_and(|entry| entry == "server/index.mjs")
+                })
+        })
 }
 
 pub(super) fn is_node_project_runtime_framework(framework: &str) -> bool {
     if matches!(framework, "nextjs" | "blitzjs" | "payload" | "nitro") {
         return false;
     }
-    // These adapters emit Node entrypoints that still resolve packages from the
-    // installed project runtime instead of producing a self-contained output.
+    // Non-standalone outputs from these adapters resolve packages from the
+    // installed project runtime.
     if matches!(
         framework,
         "astro" | "sveltekit" | "remix" | "react-router" | "tanstack-start"
@@ -1043,13 +1077,16 @@ pub(super) fn validate_node_project_runtime_dependencies(
     {
         return Ok(());
     }
+    let roots = if runtime_root == project_dir {
+        project_dir.display().to_string()
+    } else {
+        format!("{} or {}", project_dir.display(), runtime_root.display())
+    };
     Err(output::coded_error(
         "MISSING_RUNTIME_DEPENDENCIES",
         format!(
-            "JavaScript PROCESS runtime artifact requires node_modules, but none was found in {} or {}. \
-             Run the install step before deploy, or remove --skip-install.",
-            project_dir.display(),
-            runtime_root.display()
+            "JavaScript PROCESS runtime artifact requires node_modules, but none was found in {roots}. \
+             Ensure runtime dependencies remain available after the build, or configure a supported standalone output."
         ),
     ))
 }

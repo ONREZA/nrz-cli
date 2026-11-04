@@ -11,6 +11,23 @@ fn context(compiler: &str, application: &str) -> SourceBuildContext {
     .unwrap()
 }
 
+#[cfg(unix)]
+async fn assert_without_runner_environment(command: &mut tokio::process::Command) {
+    let output = command
+        .env_remove("ONREZA_BUILD_RUNTIME_VERSION")
+        .env_remove("ONREZA_BUILD_RUNTIME_FAMILY")
+        .env_remove("ONREZA_RUNTIME_VERSION")
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn admitted_targets_replace_requested_lines_without_mutating_source_intent() {
     let original = context("NODE", "BUN");
@@ -826,22 +843,12 @@ async fn local_resolved_bun_context_binds_fresh_output_without_runner_environmen
         let executable = directory.path().join("bun");
         std::fs::write(&executable, "#!/bin/sh\nprintf '1.4.4\\n'\n").unwrap();
         std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        command
             .args(["--exact", "deploy::application_runtime::tests::local_resolved_bun_context_binds_fresh_output_without_runner_environment", "--nocapture"])
             .env(CASE, "1")
-            .env("PATH", directory.path())
-            .env_remove("ONREZA_BUILD_RUNTIME_VERSION")
-            .env_remove("ONREZA_BUILD_RUNTIME_FAMILY")
-            .env_remove("ONREZA_RUNTIME_VERSION")
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+            .env("PATH", directory.path());
+        assert_without_runner_environment(&mut command).await;
         return;
     }
     let directory = tempfile::tempdir().unwrap();
@@ -1102,20 +1109,12 @@ async fn authored_runtime_binding_uses_the_build_execution_environment() {
         let bun = directory.path().join("bun");
         std::fs::write(&bun, "#!/bin/sh\nprintf '1.4.3\\n'\n").unwrap();
         std::fs::set_permissions(bun, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        command
             .args(["--exact", "deploy::application_runtime::tests::authored_runtime_binding_uses_the_build_execution_environment", "--nocapture"])
             .env(CASE, "1")
-            .env("PATH", format!("{}:/usr/bin:/bin", directory.path().display()))
-            .env_remove("ONREZA_BUILD_RUNTIME_VERSION")
-            .env_remove("ONREZA_BUILD_RUNTIME_FAMILY")
-            .env_remove("ONREZA_RUNTIME_VERSION")
-            .output().await.unwrap();
-        assert!(
-            output.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+            .env("PATH", format!("{}:/usr/bin:/bin", directory.path().display()));
+        assert_without_runner_environment(&mut command).await;
         return;
     }
     let directory = tempfile::tempdir().unwrap();
