@@ -973,6 +973,7 @@ async fn explicit_compute_controls_inferred_ssr_manifests_at_the_authored_output
                     false,
                     dir.path(),
                     explicit_compute,
+                    &[],
                 )
                 .await
                 .unwrap();

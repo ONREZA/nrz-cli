@@ -112,7 +112,17 @@ pub async fn run(
         .with_context(|| format!("project directory not found: {}", args.dir))?;
     let workspace_root = crate::detect::monorepo::discover_workspace_root(&project_dir);
     let effective = EffectiveProjectConfig::from_project_config(project_dir, config.clone());
-    run_with_effective_config(args, json, &effective, None, true, &workspace_root, None).await
+    run_with_effective_config(
+        args,
+        json,
+        &effective,
+        None,
+        true,
+        &workspace_root,
+        None,
+        &[],
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -145,10 +155,12 @@ pub async fn run_with_hint(
         true,
         &workspace_root,
         None,
+        &[],
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_with_effective_config(
     args: BuildArgs,
     json: bool,
@@ -157,6 +169,7 @@ pub(crate) async fn run_with_effective_config(
     emit_json_result: bool,
     workspace_root: &Path,
     explicit_compute: Option<crate::detect::types::ComputeType>,
+    execution_env: &[(String, String)],
 ) -> anyhow::Result<BuildResult> {
     let project_dir = effective.project_dir();
     let mut detection = detection.cloned().unwrap_or_else(|| {
@@ -339,7 +352,7 @@ pub(crate) async fn run_with_effective_config(
                 effective,
                 manifest,
                 application_runtime,
-                &[],
+                execution_env,
             )
             .await?
         } else {

@@ -707,6 +707,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         false,
         &command.root_dir,
         request.explicit_compute,
+        request.execution_env,
     )
     .await
     .map_err(|error| {

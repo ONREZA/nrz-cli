@@ -391,6 +391,7 @@ async fn bind_output(
         false,
         directory,
         None,
+        &[],
     )
     .await
     .unwrap()
@@ -755,6 +756,184 @@ async fn fresh_typed_output_without_source_launch_needs_no_trusted_serving_targe
 }
 
 #[tokio::test]
+async fn platform_runtime_validation_rejects_missing_or_mismatched_trusted_targets() {
+    const CASE: &str = "ONREZA_PLATFORM_RUNTIME_REJECTION_TEST";
+    let Ok(case) = std::env::var(CASE) else {
+        for case in [
+            "missing-context",
+            "missing-compiler",
+            "compiler-family",
+            "compiler-target",
+            "missing-application",
+            "application-target",
+        ] {
+            let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+            command.args(["--exact", "deploy::application_runtime::tests::platform_runtime_validation_rejects_missing_or_mismatched_trusted_targets", "--nocapture"])
+                .env(CASE, case)
+                .env("ONREZA_BUILD_RUNTIME_VERSION", "bun-1.4.4")
+                .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
+                .env("ONREZA_RUNTIME_VERSION", "bun-1.4.4");
+            match case {
+                "missing-compiler" => {
+                    command.env_remove("ONREZA_BUILD_RUNTIME_VERSION");
+                }
+                "compiler-family" => {
+                    command.env("ONREZA_BUILD_RUNTIME_FAMILY", "python");
+                }
+                "compiler-target" => {
+                    command.env("ONREZA_BUILD_RUNTIME_VERSION", "node-24");
+                }
+                "missing-application" => {
+                    command.env_remove("ONREZA_RUNTIME_VERSION");
+                }
+                "application-target" => {
+                    command.env("ONREZA_RUNTIME_VERSION", "node-24");
+                }
+                _ => {}
+            }
+            let output = command.output().await.unwrap();
+            assert!(
+                output.status.success(),
+                "{case}: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        return;
+    };
+    let original = context("BUN", "BUN");
+    let mut effective =
+        nrz::config::EffectiveProjectConfig::from_project_config(".".into(), Default::default());
+    effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+        source_build_context: (case != "missing-context").then(|| original.clone()),
+        ..Default::default()
+    });
+    assert!(
+        validate_application_runtime_before_build(&original, &effective, true, false, &[])
+            .await
+            .is_err(),
+        "accepted {case}"
+    );
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn local_resolved_bun_context_binds_fresh_output_without_runner_environment() {
+    use std::os::unix::fs::PermissionsExt;
+    const CASE: &str = "ONREZA_LOCAL_RESOLVED_BUN_TEST";
+    if std::env::var_os(CASE).is_none() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("bun");
+        std::fs::write(&executable, "#!/bin/sh\nprintf '1.4.4\\n'\n").unwrap();
+        std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "deploy::application_runtime::tests::local_resolved_bun_context_binds_fresh_output_without_runner_environment", "--nocapture"])
+            .env(CASE, "1")
+            .env("PATH", directory.path())
+            .env_remove("ONREZA_BUILD_RUNTIME_VERSION")
+            .env_remove("ONREZA_BUILD_RUNTIME_FAMILY")
+            .env_remove("ONREZA_RUNTIME_VERSION")
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join(".onreza")).unwrap();
+    std::fs::write(directory.path().join("server.js"), "export default 1").unwrap();
+    let original: SourceBuildContext = serde_json::from_value(json!({
+        "schemaVersion": 1, "buildToolchain": {"family": "BUN"}, "applicationRuntime": null
+    }))
+    .unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.toolchain = Some(BuildToolchainFamily::Bun);
+    config.build.output_dirs = Some(vec![".".into()]);
+    let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+        directory.path().to_owned(),
+        config,
+    );
+    let resolved =
+        validate_application_runtime_before_build(&original, &effective, false, true, &[])
+            .await
+            .unwrap();
+    effective.bind_resolved_platform_context(
+        resolved.context,
+        resolved.application_target,
+        resolved.node_version,
+    );
+    effective.mark_primary_runtime_rebuilt();
+    let mut detection = crate::detect::detect_with_framework_override(directory.path(), None);
+    crate::detect::application_runtime::bind_source_build_context(
+        &crate::detect::fs::LocalFs::new(directory.path()),
+        &mut detection,
+        &original,
+        effective.config(),
+        None,
+        None,
+    )
+    .unwrap();
+    for runtime_type in [RuntimeType::Bun, RuntimeType::Static] {
+        detection.metadata.runtime = RuntimeInfo {
+            runtime_type,
+            version: None,
+        };
+        let mut generated = crate::build::manifest::generate_compute_manifest("server.js");
+        let target = manifest_build_runtime_target(
+            &detection.metadata.runtime,
+            &effective,
+            &generated,
+            None,
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(target.as_deref(), Some("bun-1.4.4"));
+        crate::deploy::apply_application_runtime_manifest(
+            &mut generated,
+            None,
+            target.as_deref(),
+            "other",
+        )
+        .unwrap();
+        assert_eq!(
+            generated.layers[0]
+                .runtime
+                .as_ref()
+                .unwrap()
+                .build_runtime_version,
+            target
+        );
+        let mut authored = crate::build::manifest::generate_static_manifest();
+        authored.routes[0].pattern = "^/assets/.*$".into();
+        authored.routes[0].priority = Some(100);
+        let compute = crate::build::manifest::generate_compute_manifest("server.js");
+        authored.layers.extend(compute.layers);
+        authored.routes.extend(compute.routes);
+        std::fs::write(
+            directory.path().join(".onreza/manifest.json"),
+            serde_json::to_vec(&authored).unwrap(),
+        )
+        .unwrap();
+        let bound = bind_output(directory.path(), &effective, &detection).await;
+        assert_eq!(
+            bound.layers[1]
+                .runtime
+                .as_ref()
+                .unwrap()
+                .build_runtime_version
+                .as_deref(),
+            Some("bun-1.4.4")
+        );
+    }
+}
+
+#[tokio::test]
 async fn platform_implicit_bun_output_keeps_qualified_compiler_target_without_source_launch() {
     const CASE: &str = "ONREZA_IMPLICIT_BUN_OUTPUT_TEST";
     if std::env::var_os(CASE).is_none() {
@@ -911,4 +1090,85 @@ async fn platform_implicit_bun_output_keeps_qualified_compiler_target_without_so
         .unwrap();
         assert_eq!(serde_json::to_value(retained).unwrap(), before);
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn authored_runtime_binding_uses_the_build_execution_environment() {
+    use std::os::unix::fs::PermissionsExt;
+    const CASE: &str = "ONREZA_AUTHORED_RUNTIME_ENV_TEST";
+    if std::env::var_os(CASE).is_none() {
+        let directory = tempfile::tempdir().unwrap();
+        let bun = directory.path().join("bun");
+        std::fs::write(&bun, "#!/bin/sh\nprintf '1.4.3\\n'\n").unwrap();
+        std::fs::set_permissions(bun, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "deploy::application_runtime::tests::authored_runtime_binding_uses_the_build_execution_environment", "--nocapture"])
+            .env(CASE, "1")
+            .env("PATH", format!("{}:/usr/bin:/bin", directory.path().display()))
+            .env_remove("ONREZA_BUILD_RUNTIME_VERSION")
+            .env_remove("ONREZA_BUILD_RUNTIME_FAMILY")
+            .env_remove("ONREZA_RUNTIME_VERSION")
+            .output().await.unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let compiler = tempfile::tempdir().unwrap();
+    let bun = compiler.path().join("bun");
+    std::fs::write(&bun, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf '1.4.4\\n'; else printf 'execution Bun\\n' > build-witness.txt; fi\n").unwrap();
+    std::fs::set_permissions(bun, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let execution_env = vec![(
+        "PATH".into(),
+        format!("{}:/usr/bin:/bin", compiler.path().display()),
+    )];
+    let mut authored = crate::build::manifest::generate_static_manifest();
+    authored.layers[0].directory = "assets".into();
+    authored.routes[0].pattern = "^/assets/.*$".into();
+    authored.routes[0].priority = Some(100);
+    let compute = crate::build::manifest::generate_compute_manifest("server.js");
+    authored.layers.extend(compute.layers);
+    authored.routes.extend(compute.routes);
+    for (relative, contents) in [
+        ("index.html", "<h1>source</h1>".to_owned()),
+        ("dist/assets/index.html", "<h1>built</h1>".to_owned()),
+        ("dist/server.js", "export default 1".to_owned()),
+        (
+            "dist/.onreza/manifest.json",
+            serde_json::to_string(&authored).unwrap(),
+        ),
+    ] {
+        let path = directory.path().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.toolchain = Some(nrz_source_bundle::BuildToolchainFamily::Bun);
+    config.build.command = Some("bun run build".into());
+    config.build.output_directory = Some("dist".into());
+    config.deploy.compute = Some("process".into());
+    crate::deploy::test_support::write_project_config(directory.path(), &config);
+    let (command, args) =
+        crate::deploy::test_support::deploy_context(directory.path(), &config, &["--skip-install"]);
+    let plan = crate::deploy::test_support::build_plan(&args, &command, &execution_env)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("build-witness.txt")).unwrap(),
+        "execution Bun\n"
+    );
+    assert_eq!(
+        plan.artifact.runtime.manifest.layers[1]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .build_runtime_version
+            .as_deref(),
+        Some("bun-1.4.4")
+    );
 }

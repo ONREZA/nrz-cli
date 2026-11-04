@@ -78,12 +78,7 @@ fn needs_local_bun_target(
         .and_then(|layer| layer.runtime.as_ref())
         .and_then(|runtime| runtime.application_runtime.as_ref());
     intent.map_or_else(
-        || {
-            matches!(
-                runtime.runtime_type,
-                RuntimeType::Node | RuntimeType::Bun | RuntimeType::Static
-            )
-        },
+        || matches!(runtime.runtime_type, RuntimeType::Bun | RuntimeType::Static),
         |intent| intent.family == ApplicationRuntimeFamily::Bun,
     )
 }
@@ -113,7 +108,7 @@ pub(crate) async fn manifest_build_runtime_target(
     declaration: Option<&ApplicationRuntimeDeclaration>,
     environment: &[(String, String)],
 ) -> anyhow::Result<Option<String>> {
-    let platform_runner = effective.platform_source_build_context().is_some();
+    let platform_runner = effective.is_platform_runner();
     let local_bun_target = unresolved_local_bun_target(
         runtime,
         manifest,

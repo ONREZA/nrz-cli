@@ -824,6 +824,7 @@ pub struct EffectiveConfigExplanation {
 
 #[derive(Debug, Clone)]
 pub struct EffectiveProjectConfig {
+    is_platform_runner: bool,
     node_version: Option<String>,
     source_build_context: Option<nrz_source_bundle::SourceBuildContext>,
     application_runtime_target: Option<String>,
@@ -869,6 +870,7 @@ impl EffectiveProjectConfig {
             });
 
         Self {
+            is_platform_runner: false,
             node_version: None,
             source_build_context: None,
             application_runtime_target: None,
@@ -979,6 +981,7 @@ impl EffectiveProjectConfig {
     }
 
     pub fn apply_platform_runner_settings(&mut self, settings: &ProjectBuildSettings) {
+        self.is_platform_runner = true;
         self.application_runtime_target = None;
         self.primary_runtime_rebuilt = false;
         self.requested_source_build_context = settings
@@ -1040,6 +1043,10 @@ impl EffectiveProjectConfig {
 
     pub fn platform_source_build_context(&self) -> Option<&nrz_source_bundle::SourceBuildContext> {
         self.source_build_context.as_ref()
+    }
+
+    pub fn is_platform_runner(&self) -> bool {
+        self.is_platform_runner
     }
 
     pub fn bind_resolved_platform_context(

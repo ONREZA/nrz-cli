@@ -1058,6 +1058,7 @@ async fn inspect_build_output(
         false,
         directory,
         None,
+        &[],
     )
     .await
 }

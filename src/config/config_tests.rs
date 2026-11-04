@@ -275,6 +275,35 @@ fn platform_runner_snapshot_overrides_local_and_preserves_detected_commands() {
 }
 
 #[test]
+fn resolved_context_preserves_runner_provenance() {
+    let context =
+        serde_json::from_value::<nrz_source_bundle::SourceBuildContext>(serde_json::json!({
+            "schemaVersion": 1, "buildToolchain": {"family": "BUN"}, "applicationRuntime": null
+        }))
+        .unwrap();
+    for platform_runner in [false, true] {
+        let mut effective =
+            EffectiveProjectConfig::from_project_config(".".into(), Default::default());
+        assert!(!effective.is_platform_runner());
+        if platform_runner {
+            effective.apply_platform_runner_settings(&ProjectBuildSettings {
+                source_build_context: Some(context.clone()),
+                ..Default::default()
+            });
+        } else {
+            effective.apply_server_settings(Some(&ProjectBuildSettings {
+                source_build_context: Some(context.clone()),
+                ..Default::default()
+            }));
+        }
+        effective.bind_resolved_platform_context(context.clone(), None, None);
+        assert_eq!(effective.platform_source_build_context(), Some(&context));
+        assert_eq!(effective.is_platform_runner(), platform_runner);
+        assert_eq!(effective.clone().is_platform_runner(), platform_runner);
+    }
+}
+
+#[test]
 fn project_build_settings_requires_platform_snapshot_identity() {
     let missing_root = serde_json::from_value::<ProjectBuildSettings>(serde_json::json!({
         "packageManager": "NPM"
