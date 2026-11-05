@@ -305,7 +305,7 @@ dependencies = [
 [[package]]
 name = "bao-tree"
 version = "0.17.0"
-source = "git+https://github.com/ONREZA/bao-tree?rev=6f2eedded654982680ef7a739c1affcdf6b5d160#6f2eedded654982680ef7a739c1affcdf6b5d160"
+source = "git+https://github.com/n0-computer/bao-tree?rev=d50f2b2ce4b2477f9c7bfa3c452914b9bc66b334#d50f2b2ce4b2477f9c7bfa3c452914b9bc66b334"
 dependencies = [
  "blake3",
  "bytes",
@@ -2013,8 +2013,8 @@ dependencies = [
 
 [[package]]
 name = "iroh-blobs"
-version = "0.103.1"
-source = "git+https://github.com/ONREZA/iroh-blobs?rev=8676c05036e7983b5aeb4a711917d2ec4a93565f#8676c05036e7983b5aeb4a711917d2ec4a93565f"
+version = "0.104.1"
+source = "git+https://github.com/ONREZA/iroh-blobs?rev=b80ade979186c53b02435d32e4a13b4d58fab46d#b80ade979186c53b02435d32e4a13b4d58fab46d"
 dependencies = [
  "bao-tree",
  "bytes",

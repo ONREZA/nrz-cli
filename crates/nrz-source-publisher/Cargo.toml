@@ -13,7 +13,7 @@ test = true
 [dependencies]
 tempfile = "3"
 iroh = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018", default-features = false, features = ["tls-ring"] }
-iroh-blobs = { git = "https://github.com/ONREZA/iroh-blobs", rev = "8676c05036e7983b5aeb4a711917d2ec4a93565f", default-features = false }
+iroh-blobs = { git = "https://github.com/ONREZA/iroh-blobs", rev = "b80ade979186c53b02435d32e4a13b4d58fab46d", default-features = false }
 bao-tree = { version = "0.17", default-features = false, features = ["fs", "validate"] }
 anyhow = "1"
 bytes = "1"

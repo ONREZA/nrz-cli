@@ -137,9 +137,9 @@ inherits = "release"
 lto = true
 codegen-units = 1
 
-# Keep the blob adapter on the same reviewed private transport implementation.
+# Keep the blob adapter on the reviewed transport dependencies.
 [patch.crates-io]
-bao-tree = { git = "https://github.com/ONREZA/bao-tree", rev = "6f2eedded654982680ef7a739c1affcdf6b5d160" }
+bao-tree = { git = "https://github.com/n0-computer/bao-tree", rev = "d50f2b2ce4b2477f9c7bfa3c452914b9bc66b334" }
 iroh-tickets = { git = "https://github.com/ONREZA/iroh-tickets", rev = "0aa7ba6987c6f5ecb7221946c445d5d71354b5ab" }
 iroh = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }
 iroh-base = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }
