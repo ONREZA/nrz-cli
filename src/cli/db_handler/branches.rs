@@ -53,7 +53,7 @@ pub(super) async fn cmd_branches_create(
     let branch: Branch = client
         .create_database_branch(
             db_id,
-            nrz_api::BranchRequestBody {
+            nrz_api::BranchRequestBody2 {
                 name: name.to_string(),
                 ..Default::default()
             },

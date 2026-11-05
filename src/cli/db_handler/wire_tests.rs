@@ -142,7 +142,7 @@ async fn branch_requests_encode_identifiers_and_preserve_list_metadata() {
     let created = client
         .create_database_branch(
             DB,
-            nrz_api::BranchRequestBody {
+            nrz_api::BranchRequestBody2 {
                 name: "preview".into(),
                 ..Default::default()
             },
@@ -187,7 +187,7 @@ async fn database_controls_send_no_body_and_keep_operation_acknowledgements() {
     .await;
     assert_eq!(
         client.start_database(DB).await.unwrap().status,
-        nrz_api::Start200ResponseStatus::Pending
+        nrz_api::Database200ResponseDatumRuntimeOperationStatus::Pending
     );
     assert_eq!(
         client.stop_database(DB).await.unwrap().operation_id,

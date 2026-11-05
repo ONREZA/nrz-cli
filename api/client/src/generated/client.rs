@@ -798,7 +798,7 @@ impl PlatformClient {
     pub async fn delete_v1preview_access_by_id_by_secret_id(
         &self,
         request: DeleteV1previewAccessByIdBySecretIdRequest,
-    ) -> anyhow::Result<DeleteV1previewAccessByIdBySecretIdResponse> {
+    ) -> anyhow::Result<DeleteV1kvV2storesByStoreIdResponse> {
         request.validate().context("parameter validation")?;
         let mut url = self.base_url.clone();
         url.path_segments_mut()
@@ -964,6 +964,245 @@ impl PlatformClient {
             .push(&request.path.project_id.to_string());
         let response = self.client.put(url).json(&request.body).send().await?;
         Ok(PutV1computeConfigByProjectIdRequest::parse_response(response).await?)
+    }
+    /// List available KV regions
+    ///
+    /// * Path: `GET /v1/kv-v2/regions`
+    pub async fn get_v1kv_v2regions(
+        &self,
+        request: GetV1kvV2regionsRequest,
+    ) -> anyhow::Result<GetV1kvV2regionsResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("regions");
+        let response = self.client.get(url).query(&request.query).send().await?;
+        Ok(GetV1kvV2regionsRequest::parse_response(response).await?)
+    }
+    /// List KV Stores
+    ///
+    /// * Path: `GET /v1/kv-v2/stores`
+    pub async fn get_v1kv_v2stores(
+        &self,
+        request: GetV1kvV2storesRequest,
+    ) -> anyhow::Result<GetV1kvV2storesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores");
+        let response = self.client.get(url).query(&request.query).send().await?;
+        Ok(GetV1kvV2storesRequest::parse_response(response).await?)
+    }
+    /// Create a KV Store and main branch
+    ///
+    /// * Path: `POST /v1/kv-v2/stores`
+    pub async fn post_v1kv_v2stores(
+        &self,
+        request: PostV1kvV2storesRequest,
+    ) -> anyhow::Result<PostV1kvV2storesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1kvV2storesRequest::parse_response(response).await?)
+    }
+    /// Read a KV Store
+    ///
+    /// * Path: `GET /v1/kv-v2/stores/{storeId}`
+    pub async fn get_v1kv_v2stores_by_store_id(
+        &self,
+        request: GetV1kvV2storesByStoreIdRequest,
+    ) -> anyhow::Result<GetV1kvV2storesByStoreIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1kvV2storesByStoreIdRequest::parse_response(response).await?)
+    }
+    /// Retire a KV Store
+    ///
+    /// * Path: `DELETE /v1/kv-v2/stores/{storeId}`
+    pub async fn delete_v1kv_v2stores_by_store_id(
+        &self,
+        request: DeleteV1kvV2storesByStoreIdRequest,
+    ) -> anyhow::Result<DeleteV1kvV2storesByStoreIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string());
+        let response = self.client.delete(url).send().await?;
+        Ok(DeleteV1kvV2storesByStoreIdRequest::parse_response(response).await?)
+    }
+    /// List KV branches
+    ///
+    /// * Path: `GET /v1/kv-v2/stores/{storeId}/branches`
+    pub async fn get_v1kv_v2stores_by_store_id_branches(
+        &self,
+        request: GetV1kvV2storesByStoreIdBranchesRequest,
+    ) -> anyhow::Result<GetV1kvV2storesByStoreIdBranchesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches");
+        let response = self.client.get(url).query(&request.query).send().await?;
+        Ok(GetV1kvV2storesByStoreIdBranchesRequest::parse_response(response).await?)
+    }
+    /// Create an empty KV branch
+    ///
+    /// * Path: `POST /v1/kv-v2/stores/{storeId}/branches`
+    pub async fn post_v1kv_v2stores_by_store_id_branches(
+        &self,
+        request: PostV1kvV2storesByStoreIdBranchesRequest,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1kvV2storesByStoreIdBranchesRequest::parse_response(response).await?)
+    }
+    /// Read a KV branch
+    ///
+    /// * Path: `GET /v1/kv-v2/stores/{storeId}/branches/{branchId}`
+    pub async fn get_v1kv_v2stores_by_store_id_branches_by_branch_id(
+        &self,
+        request: GetV1kvV2storesByStoreIdBranchesByBranchIdRequest,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1kvV2storesByStoreIdBranchesByBranchIdRequest::parse_response(response).await?)
+    }
+    /// Retire a KV branch
+    ///
+    /// * Path: `DELETE /v1/kv-v2/stores/{storeId}/branches/{branchId}`
+    pub async fn delete_v1kv_v2stores_by_store_id_branches_by_branch_id(
+        &self,
+        request: DeleteV1kvV2storesByStoreIdBranchesByBranchIdRequest,
+    ) -> anyhow::Result<DeleteV1kvV2storesByStoreIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string());
+        let response = self.client.delete(url).send().await?;
+        Ok(DeleteV1kvV2storesByStoreIdBranchesByBranchIdRequest::parse_response(response).await?)
+    }
+    /// Change KV batching after active leases expire
+    ///
+    /// * Path: `PATCH /v1/kv-v2/stores/{storeId}/branches/{branchId}/batch-window`
+    pub async fn patch_v1kv_v2stores_by_store_id_branches_by_branch_id_batch_window(
+        &self,
+        request: PatchV1kvV2storesByStoreIdBranchesByBranchIdBatchWindowRequest,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string())
+            .push("batch-window");
+        let response = self.client.patch(url).json(&request.body).send().await?;
+        Ok(
+            PatchV1kvV2storesByStoreIdBranchesByBranchIdBatchWindowRequest::parse_response(
+                response,
+            )
+            .await?,
+        )
+    }
+    /// Execute a binary KV operation
+    ///
+    /// * Path: `POST /v1/kv-v2/stores/{storeId}/branches/{branchId}/request`
+    pub async fn post_v1kv_v2stores_by_store_id_branches_by_branch_id_request(
+        &self,
+        request: PostV1kvV2storesByStoreIdBranchesByBranchIdRequestRequest,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string())
+            .push("request");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(
+            PostV1kvV2storesByStoreIdBranchesByBranchIdRequestRequest::parse_response(response)
+                .await?,
+        )
+    }
+    /// Create a copy-on-write KV branch
+    ///
+    /// * Path: `POST /v1/kv-v2/stores/{storeId}/branches/{branchId}/fork`
+    pub async fn post_v1kv_v2stores_by_store_id_branches_by_branch_id_fork(
+        &self,
+        request: PostV1kvV2storesByStoreIdBranchesByBranchIdForkRequest,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string())
+            .push("fork");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(
+            PostV1kvV2storesByStoreIdBranchesByBranchIdForkRequest::parse_response(response)
+                .await?,
+        )
     }
     /// List managed databases
     ///
@@ -2489,6 +2728,234 @@ impl PlatformClientRaw {
             .push("compute-config")
             .push(&request.path.project_id.to_string());
         let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// List available KV regions
+    ///
+    /// * Path: `GET /v1/kv-v2/regions`
+    pub async fn get_v1kv_v2regions(
+        &self,
+        request: GetV1kvV2regionsRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("regions");
+        let response = self.client.get(url).query(&request.query).send().await?;
+        Ok(response)
+    }
+    /// List KV Stores
+    ///
+    /// * Path: `GET /v1/kv-v2/stores`
+    pub async fn get_v1kv_v2stores(
+        &self,
+        request: GetV1kvV2storesRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores");
+        let response = self.client.get(url).query(&request.query).send().await?;
+        Ok(response)
+    }
+    /// Create a KV Store and main branch
+    ///
+    /// * Path: `POST /v1/kv-v2/stores`
+    pub async fn post_v1kv_v2stores(
+        &self,
+        request: PostV1kvV2storesRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Read a KV Store
+    ///
+    /// * Path: `GET /v1/kv-v2/stores/{storeId}`
+    pub async fn get_v1kv_v2stores_by_store_id(
+        &self,
+        request: GetV1kvV2storesByStoreIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
+    /// Retire a KV Store
+    ///
+    /// * Path: `DELETE /v1/kv-v2/stores/{storeId}`
+    pub async fn delete_v1kv_v2stores_by_store_id(
+        &self,
+        request: DeleteV1kvV2storesByStoreIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string());
+        let response = self.client.delete(url).send().await?;
+        Ok(response)
+    }
+    /// List KV branches
+    ///
+    /// * Path: `GET /v1/kv-v2/stores/{storeId}/branches`
+    pub async fn get_v1kv_v2stores_by_store_id_branches(
+        &self,
+        request: GetV1kvV2storesByStoreIdBranchesRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches");
+        let response = self.client.get(url).query(&request.query).send().await?;
+        Ok(response)
+    }
+    /// Create an empty KV branch
+    ///
+    /// * Path: `POST /v1/kv-v2/stores/{storeId}/branches`
+    pub async fn post_v1kv_v2stores_by_store_id_branches(
+        &self,
+        request: PostV1kvV2storesByStoreIdBranchesRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Read a KV branch
+    ///
+    /// * Path: `GET /v1/kv-v2/stores/{storeId}/branches/{branchId}`
+    pub async fn get_v1kv_v2stores_by_store_id_branches_by_branch_id(
+        &self,
+        request: GetV1kvV2storesByStoreIdBranchesByBranchIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
+    /// Retire a KV branch
+    ///
+    /// * Path: `DELETE /v1/kv-v2/stores/{storeId}/branches/{branchId}`
+    pub async fn delete_v1kv_v2stores_by_store_id_branches_by_branch_id(
+        &self,
+        request: DeleteV1kvV2storesByStoreIdBranchesByBranchIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string());
+        let response = self.client.delete(url).send().await?;
+        Ok(response)
+    }
+    /// Change KV batching after active leases expire
+    ///
+    /// * Path: `PATCH /v1/kv-v2/stores/{storeId}/branches/{branchId}/batch-window`
+    pub async fn patch_v1kv_v2stores_by_store_id_branches_by_branch_id_batch_window(
+        &self,
+        request: PatchV1kvV2storesByStoreIdBranchesByBranchIdBatchWindowRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string())
+            .push("batch-window");
+        let response = self.client.patch(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Execute a binary KV operation
+    ///
+    /// * Path: `POST /v1/kv-v2/stores/{storeId}/branches/{branchId}/request`
+    pub async fn post_v1kv_v2stores_by_store_id_branches_by_branch_id_request(
+        &self,
+        request: PostV1kvV2storesByStoreIdBranchesByBranchIdRequestRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string())
+            .push("request");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Create a copy-on-write KV branch
+    ///
+    /// * Path: `POST /v1/kv-v2/stores/{storeId}/branches/{branchId}/fork`
+    pub async fn post_v1kv_v2stores_by_store_id_branches_by_branch_id_fork(
+        &self,
+        request: PostV1kvV2storesByStoreIdBranchesByBranchIdForkRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kv-v2")
+            .push("stores")
+            .push(&request.path.store_id.to_string())
+            .push("branches")
+            .push(&request.path.branch_id.to_string())
+            .push("fork");
+        let response = self.client.post(url).json(&request.body).send().await?;
         Ok(response)
     }
     /// List managed databases

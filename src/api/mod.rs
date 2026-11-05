@@ -20,6 +20,7 @@ mod environments;
 mod execution;
 mod functions;
 mod identity;
+mod kv_v2;
 mod preview;
 mod projects;
 mod publication;

@@ -416,34 +416,44 @@ async fn real_python_build_startup_processes_pth_once() {
 }
 
 #[cfg(unix)]
+fn write_python_executable(path: &Path, contents: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let source = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(source.path(), contents).unwrap();
+    // Keep executable write FDs out of concurrently forked test children.
+    let output = std::process::Command::new("/bin/cp")
+        .arg(source.path())
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(unix)]
 #[tokio::test]
 async fn python_compiler_probe_accepts_actual_minors_and_patches_outside_the_catalog() {
-    use std::os::unix::fs::PermissionsExt;
     let directory = tempfile::tempdir().unwrap();
     let interpreter = directory.path().join("python");
     for (version, expected) in [("3.11.99", "3.11"), ("3.14.999", "3.14"), ("4.0.1", "4.0")] {
-        std::fs::write(
+        write_python_executable(
             &interpreter,
-            format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
-        )
-        .unwrap();
-        std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o755)).unwrap();
+            &format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
+        );
         let selected = probe_interpreter(&interpreter).await.unwrap();
         assert_eq!(selected.path, interpreter.canonicalize().unwrap());
         assert_eq!(selected.minor.version(), expected);
     }
-    std::fs::write(&interpreter, "#!/bin/sh\nprintf 'not-cpython\\n'\n").unwrap();
+    write_python_executable(&interpreter, "#!/bin/sh\nprintf 'not-cpython\\n'\n");
     assert!(probe_interpreter(&interpreter).await.is_err());
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn platform_build_uses_available_python_minor_without_declaration_gate() {
-    use std::os::unix::fs::PermissionsExt;
     let directory = tempfile::tempdir().unwrap();
     let interpreter = directory.path().join("python");
-    std::fs::write(&interpreter, "#!/bin/sh\nprintf '3.15.1\\n'\n").unwrap();
-    std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o755)).unwrap();
+    write_python_executable(&interpreter, "#!/bin/sh\nprintf '3.15.1\\n'\n");
     let environment = build_environment_for_interpreter(directory.path(), &interpreter, &[])
         .await
         .unwrap();
@@ -452,7 +462,7 @@ async fn platform_build_uses_available_python_minor_without_declaration_gate() {
             && value.contains(".onreza/python/3.15/site-packages"))
     );
     assert!(directory.path().join(".onreza/python/build").exists());
-    std::fs::write(&interpreter, "#!/bin/sh\nprintf '3.14.999\\n'\n").unwrap();
+    write_python_executable(&interpreter, "#!/bin/sh\nprintf '3.14.999\\n'\n");
     build_environment_for_interpreter(directory.path(), &interpreter, &[])
         .await
         .unwrap();
@@ -461,24 +471,21 @@ async fn platform_build_uses_available_python_minor_without_declaration_gate() {
 #[cfg(unix)]
 #[tokio::test]
 async fn available_python_probe_needs_no_uv_and_observes_the_path_executable() {
-    use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
     let executable = root.path().join("python3");
     let environment = vec![("PATH".into(), root.path().display().to_string())];
     assert!(available_interpreter(&environment).await.is_err());
     for (actual, minor) in [("3.13.99", "3.13"), ("3.14.10", "3.14"), ("4.0.1", "4.0")] {
-        std::fs::write(
+        write_python_executable(
             &executable,
-            format!("#!/bin/sh\nprintf '%s\n' '{actual}'\n"),
-        )
-        .unwrap();
-        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            &format!("#!/bin/sh\nprintf '%s\n' '{actual}'\n"),
+        );
         let observed = available_interpreter(&environment).await.unwrap();
         assert_eq!(observed.path, executable.canonicalize().unwrap());
         assert_eq!(observed.version, actual);
         assert_eq!(observed.minor.version(), minor);
     }
-    std::fs::write(&executable, "#!/bin/sh\nprintf 'not-cpython\n'\n").unwrap();
+    write_python_executable(&executable, "#!/bin/sh\nprintf 'not-cpython\n'\n");
     assert!(available_interpreter(&environment).await.is_err());
     std::fs::remove_file(executable).unwrap();
     assert!(available_interpreter(&environment).await.is_err());
@@ -487,7 +494,6 @@ async fn available_python_probe_needs_no_uv_and_observes_the_path_executable() {
 #[cfg(unix)]
 #[tokio::test]
 async fn available_python_respects_path_directory_precedence() {
-    use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
     let active = root.path().join("active");
     let system = root.path().join("system");
@@ -495,12 +501,10 @@ async fn available_python_respects_path_directory_precedence() {
     std::fs::create_dir_all(&system).unwrap();
     let selected = active.join("python");
     for (executable, version) in [(&selected, "3.13.99"), (&system.join("python3"), "3.14.10")] {
-        std::fs::write(
+        write_python_executable(
             executable,
-            format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
-        )
-        .unwrap();
-        std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            &format!("#!/bin/sh\nprintf '%s\\n' '{version}'\n"),
+        );
     }
     let environment = vec![(
         "PATH".into(),
@@ -517,11 +521,9 @@ async fn available_python_respects_path_directory_precedence() {
 #[cfg(unix)]
 #[tokio::test]
 async fn available_python_probe_has_a_bounded_wait_for_hanging_path_shims() {
-    use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
     let executable = root.path().join("python3");
-    std::fs::write(&executable, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
-    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    write_python_executable(&executable, "#!/bin/sh\nexec /bin/sleep 30\n");
     let environment = vec![("PATH".into(), root.path().display().to_string())];
     let error = tokio::time::timeout(
         std::time::Duration::from_secs(15),

@@ -42,7 +42,7 @@ impl ApiClient {
         api_success!(
             response,
             DeleteV1previewAccessByIdBySecretIdRequest,
-            DeleteV1previewAccessByIdBySecretIdResponse::Ok
+            DeleteV1kvV2storesByStoreIdResponse::Ok
         )
     }
 }

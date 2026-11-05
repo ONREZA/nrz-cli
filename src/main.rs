@@ -205,6 +205,7 @@ async fn run_command(
         Command::DeploySet(args) => deploy::run_set(args, json, token, workspace).await,
         Command::Db(args) => cli::db_handler::run(args, json, token, workspace, config).await,
         Command::Kv(args) => cli::kv_handler::run(args, json).await,
+        Command::KvV2(args) => cli::kv_v2_handler::run(args, json, token, workspace).await,
         Command::Login => auth::login(json, token).await,
         Command::Whoami => auth::whoami(json, token, workspace).await,
         Command::Logout(args) => auth::logout(json, workspace, args.all).await,

@@ -123,8 +123,8 @@ impl From<nrz_api::ManagedDatabaseBranchListItem> for Branch {
         }
     }
 }
-impl From<nrz_api::Branch200Response2> for Branch {
-    fn from(value: nrz_api::Branch200Response2) -> Self {
+impl From<nrz_api::Branch200Response3> for Branch {
+    fn from(value: nrz_api::Branch200Response3) -> Self {
         Self {
             id: value.id,
             name: value.name,

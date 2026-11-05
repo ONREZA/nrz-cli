@@ -87,7 +87,8 @@ nrz deploy --prod
 | Build/Deploy | `nrz detect`, `nrz build`, `nrz deploy`, `nrz rollback` |
 | Runtime | `nrz deployments`, `nrz logs` |
 | Database | `nrz db list`, `nrz db query "SELECT 1"`, `nrz db schema`, `nrz db branches` |
-| KV | `nrz kv get <key> --env preview`, `nrz kv set <key> <value> --ttl 60 --env preview`, `nrz kv list --prefix app_` |
+| Remote KV v2 | `nrz kv-v2 regions`, `nrz kv-v2 stores list`, `nrz kv-v2 branches --store <UUID> list`, `nrz kv-v2 data --store <UUID> --branch <UUID> get <key>` |
+| Local KV | `nrz kv get <key> --env preview`, `nrz kv set <key> <value> --ttl 60 --env preview`, `nrz kv list --prefix app_` |
 | Environment | `nrz context use <environment>`, `nrz env list`, `nrz env set`, `nrz env validate`, `nrz env exec -- <command>` |
 | Domains | `nrz domains list`, `nrz domains add example.com`, `nrz domains verify <domain_id>` |
 | Account | `nrz whoami`, `nrz workspace list`, `nrz workspace switch <slug>`, `nrz upgrade` |

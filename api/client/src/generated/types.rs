@@ -75,6 +75,13 @@ static REGEX_REMOTE_IMAGE_SOURCE_AUTHORING_ID: std::sync::LazyLock<regex::Regex>
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$").expect("invalid regex")
     });
+static REGEX_REQUEST_REQUEST_BODY_OBJECT_KEY: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$",
+        )
+        .expect("invalid regex")
+    });
 static REGEX_SOURCE_PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new("\\.nrz-fn\\.(?:ts|tsx|js|jsx|mjs)$").expect("invalid regex")
 });
@@ -99,6 +106,10 @@ static REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_RUNTIME_LAYER_RUNTIME_CONF
 static REGEX_STEP_KIND_OBJECT_R_USE: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$").expect("invalid regex")
+    });
+static REGEX_STORE_REQUEST_BODY_REGION: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| {
+        regex::Regex::new("^[A-Za-z0-9_-]{1,128}$").expect("invalid regex")
     });
 static REGEX_TOKEN_REQUEST_BODY_DEVICE_CODE: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[A-Za-z0-9]{40}$").expect("invalid regex"));
@@ -9005,128 +9016,92 @@ impl DeleteV1previewAccessByIdBySecretIdRequest {
     /// Parse the HTTP response into the response enum.
     pub async fn parse_response(
         req: reqwest::Response,
-    ) -> anyhow::Result<DeleteV1previewAccessByIdBySecretIdResponse> {
+    ) -> anyhow::Result<DeleteV1kvV2storesByStoreIdResponse> {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data = oas3_gen_support::Diagnostics::<SuccessResponse>::json_with_diagnostics(req)
                 .await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::Ok(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Ok(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::BadRequest(
-                data,
-            ));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::BadRequest(data));
         }
         if status == http::StatusCode::UNAUTHORIZED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::Unauthorized(
-                data,
-            ));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Unauthorized(data));
         }
         if status == http::StatusCode::PAYMENT_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::PaymentRequired(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::PaymentRequired(data));
         }
         if status == http::StatusCode::FORBIDDEN {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::Forbidden(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Forbidden(data));
         }
         if status == http::StatusCode::NOT_FOUND {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::NotFound(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::NotFound(data));
         }
         if status == http::StatusCode::REQUEST_TIMEOUT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::RequestTimeout(
-                data,
-            ));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::RequestTimeout(data));
         }
         if status == http::StatusCode::CONFLICT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::Conflict(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Conflict(data));
         }
         if status == http::StatusCode::GONE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::Gone(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Gone(data));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::ContentTooLarge(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::ContentTooLarge(data));
         }
         if status == http::StatusCode::UNPROCESSABLE_ENTITY {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::UnprocessableEntity(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::UnprocessableEntity(
+                data,
+            ));
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::UpgradeRequired(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::UpgradeRequired(data));
         }
         if status == http::StatusCode::TOO_MANY_REQUESTS {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::TooManyRequests(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::TooManyRequests(data));
         }
         if status == http::StatusCode::INTERNAL_SERVER_ERROR {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::InternalServerError(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::InternalServerError(
+                data,
+            ));
         }
         if status == http::StatusCode::SERVICE_UNAVAILABLE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::ServiceUnavailable(data));
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::ServiceUnavailable(
+                data,
+            ));
         }
         let _ = req.bytes().await?;
-        return Ok(DeleteV1previewAccessByIdBySecretIdResponse::Unknown);
+        return Ok(DeleteV1kvV2storesByStoreIdResponse::Unknown);
     }
-}
-/// Response types for deleteV1PreviewAccessByIdBySecretId
-#[derive(Debug, Clone)]
-pub enum DeleteV1previewAccessByIdBySecretIdResponse {
-    ///200: Response for status 200
-    Ok(SuccessResponse),
-    ///400: Response for status 400
-    BadRequest(ApiError400),
-    ///401: Response for status 401
-    Unauthorized(ApiError401),
-    ///402: Response for status 402
-    PaymentRequired(ApiError402),
-    ///403: Response for status 403
-    Forbidden(ApiError403),
-    ///404: Response for status 404
-    NotFound(ApiError404),
-    ///408: Response for status 408
-    RequestTimeout(ApiError408),
-    ///409: Response for status 409
-    Conflict(ApiError409),
-    ///410: Response for status 410
-    Gone(ApiError410),
-    ///413: Response for status 413
-    ContentTooLarge(ApiError413),
-    ///422: Response for status 422
-    UnprocessableEntity(ApiError422),
-    ///426: Response for status 426
-    UpgradeRequired(ApiError426),
-    ///429: Response for status 429
-    TooManyRequests(ApiError429),
-    ///500: Response for status 500
-    InternalServerError(ApiError500),
-    ///503: Response for status 503
-    ServiceUnavailable(ApiError503),
-    ///default: Unknown response
-    Unknown,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequestPath {
@@ -10413,6 +10388,1692 @@ pub enum PutV1computeConfigByProjectIdResponse {
     ///default: Unknown response
     Unknown,
 }
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+pub struct GetV1kvV2regionsRequestQuery {
+    #[serde(rename = "storeId")]
+    pub store_id: Option<uuid::Uuid>,
+}
+/// List available KV regions
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1kvV2regionsRequest {
+    pub query: GetV1kvV2regionsRequestQuery,
+}
+impl GetV1kvV2regionsRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1kvV2regionsResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<RegionResponse>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2regionsResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1kvV2regionsResponse::Unknown);
+    }
+}
+/// Response types for getV1KvV2Regions
+#[derive(Debug, Clone)]
+pub enum GetV1kvV2regionsResponse {
+    ///200: Response for status 200
+    Ok(RegionResponse),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+pub struct GetV1kvV2storesRequestQuery {
+    pub after: Option<uuid::Uuid>,
+    pub limit: Option<serde_json::Value>,
+}
+/// List KV Stores
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1kvV2storesRequest {
+    pub query: GetV1kvV2storesRequestQuery,
+}
+impl GetV1kvV2storesRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<GetV1kvV2storesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Store200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1kvV2storesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1kvV2storesResponse::Unknown);
+    }
+}
+/// Response types for getV1KvV2Stores
+#[derive(Debug, Clone)]
+pub enum GetV1kvV2storesResponse {
+    ///200: Response for status 200
+    Ok(Store200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct StoreRequestBody {
+    pub id: uuid::Uuid,
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub name: String,
+    #[serde(rename = "mainBranchId")]
+    pub main_branch_id: uuid::Uuid,
+    #[validate(regex(path = "REGEX_STORE_REQUEST_BODY_REGION"))]
+    pub region: String,
+    #[serde(rename = "batchWindowMs")]
+    #[validate(range(min = 1i64, max = 3_600_000i64))]
+    pub batch_window_ms: Option<i64>,
+}
+/// Create a KV Store and main branch
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1kvV2storesRequest {
+    #[validate(nested)]
+    pub body: StoreRequestBody,
+}
+impl PostV1kvV2storesRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1kvV2storesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Store200Response2>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1kvV2storesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1kvV2storesResponse::Unknown);
+    }
+}
+/// Response types for postV1KvV2Stores
+#[derive(Debug, Clone)]
+pub enum PostV1kvV2storesResponse {
+    ///200: Response for status 200
+    Ok(Store200Response2),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1kvV2storesByStoreIdRequestPath {
+    pub store_id: uuid::Uuid,
+}
+/// Read a KV Store
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1kvV2storesByStoreIdRequest {
+    pub path: GetV1kvV2storesByStoreIdRequestPath,
+}
+impl GetV1kvV2storesByStoreIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1kvV2storesByStoreIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Store200ResponseStore>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1kvV2storesByStoreIdResponse::Unknown);
+    }
+}
+/// Response types for getV1KvV2StoresByStoreId
+#[derive(Debug, Clone)]
+pub enum GetV1kvV2storesByStoreIdResponse {
+    ///200: Response for status 200
+    Ok(Store200ResponseStore),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct DeleteV1kvV2storesByStoreIdRequestPath {
+    pub store_id: uuid::Uuid,
+}
+/// Retire a KV Store
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct DeleteV1kvV2storesByStoreIdRequest {
+    pub path: DeleteV1kvV2storesByStoreIdRequestPath,
+}
+impl DeleteV1kvV2storesByStoreIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<DeleteV1kvV2storesByStoreIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<SuccessResponse>::json_with_diagnostics(req)
+                .await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::UnprocessableEntity(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::ServiceUnavailable(
+                data,
+            ));
+        }
+        let _ = req.bytes().await?;
+        return Ok(DeleteV1kvV2storesByStoreIdResponse::Unknown);
+    }
+}
+/// Response types for deleteV1KvV2StoresByStoreId
+#[derive(Debug, Clone)]
+pub enum DeleteV1kvV2storesByStoreIdResponse {
+    ///200: Response for status 200
+    Ok(SuccessResponse),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1kvV2storesByStoreIdBranchesRequestPath {
+    pub store_id: uuid::Uuid,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+pub struct GetV1kvV2storesByStoreIdBranchesRequestQuery {
+    pub after: Option<uuid::Uuid>,
+    pub limit: Option<serde_json::Value>,
+}
+/// List KV branches
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1kvV2storesByStoreIdBranchesRequest {
+    pub path: GetV1kvV2storesByStoreIdBranchesRequestPath,
+    pub query: GetV1kvV2storesByStoreIdBranchesRequestQuery,
+}
+impl GetV1kvV2storesByStoreIdBranchesRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1kvV2storesByStoreIdBranchesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Branch200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::PaymentRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::RequestTimeout(
+                data,
+            ));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::ContentTooLarge(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::UpgradeRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::TooManyRequests(
+                data,
+            ));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kvV2storesByStoreIdBranchesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1kvV2storesByStoreIdBranchesResponse::Unknown);
+    }
+}
+/// Response types for getV1KvV2StoresByStoreIdBranches
+#[derive(Debug, Clone)]
+pub enum GetV1kvV2storesByStoreIdBranchesResponse {
+    ///200: Response for status 200
+    Ok(Branch200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct BranchRequestBody {
+    pub id: uuid::Uuid,
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub name: String,
+    #[validate(regex(path = "REGEX_STORE_REQUEST_BODY_REGION"))]
+    pub region: String,
+    #[serde(rename = "batchWindowMs")]
+    #[validate(range(min = 1i64, max = 3_600_000i64))]
+    pub batch_window_ms: Option<i64>,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1kvV2storesByStoreIdBranchesRequestPath {
+    pub store_id: uuid::Uuid,
+}
+/// Create an empty KV branch
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1kvV2storesByStoreIdBranchesRequest {
+    pub path: PostV1kvV2storesByStoreIdBranchesRequestPath,
+    #[validate(nested)]
+    pub body: BranchRequestBody,
+}
+impl PostV1kvV2storesByStoreIdBranchesRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Store200Response2Branch>::json_with_diagnostics(
+                    req,
+                )
+                .await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Unauthorized(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::PaymentRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::RequestTimeout(
+                data,
+            ));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::ContentTooLarge(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::UpgradeRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::TooManyRequests(
+                data,
+            ));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Unknown);
+    }
+}
+/// Response types for postV1KvV2StoresByStoreIdBranches
+#[derive(Debug, Clone)]
+pub enum PostV1kvV2storesByStoreIdBranchesResponse {
+    ///200: Response for status 200
+    Ok(Store200Response2Branch),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1kvV2storesByStoreIdBranchesByBranchIdRequestPath {
+    pub store_id: uuid::Uuid,
+    pub branch_id: uuid::Uuid,
+}
+/// Read a KV branch
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1kvV2storesByStoreIdBranchesByBranchIdRequest {
+    pub path: GetV1kvV2storesByStoreIdBranchesByBranchIdRequestPath,
+}
+impl GetV1kvV2storesByStoreIdBranchesByBranchIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Store200Response2Branch>::json_with_diagnostics(
+                    req,
+                )
+                .await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Unauthorized(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::PaymentRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::RequestTimeout(
+                data,
+            ));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::ContentTooLarge(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::UpgradeRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::TooManyRequests(
+                data,
+            ));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Unknown);
+    }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct DeleteV1kvV2storesByStoreIdBranchesByBranchIdRequestPath {
+    pub store_id: uuid::Uuid,
+    pub branch_id: uuid::Uuid,
+}
+/// Retire a KV branch
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct DeleteV1kvV2storesByStoreIdBranchesByBranchIdRequest {
+    pub path: DeleteV1kvV2storesByStoreIdBranchesByBranchIdRequestPath,
+}
+impl DeleteV1kvV2storesByStoreIdBranchesByBranchIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<DeleteV1kvV2storesByStoreIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<SuccessResponse>::json_with_diagnostics(req)
+                .await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::UnprocessableEntity(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kvV2storesByStoreIdResponse::ServiceUnavailable(
+                data,
+            ));
+        }
+        let _ = req.bytes().await?;
+        return Ok(DeleteV1kvV2storesByStoreIdResponse::Unknown);
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct BatchWindowMRequestBody {
+    #[serde(rename = "batchWindowMs")]
+    #[validate(range(min = 1i64, max = 3_600_000i64))]
+    pub batch_window_ms: i64,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PatchV1kvV2storesByStoreIdBranchesByBranchIdBatchWindowRequestPath {
+    pub store_id: uuid::Uuid,
+    pub branch_id: uuid::Uuid,
+}
+/// Change KV batching after active leases expire
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PatchV1kvV2storesByStoreIdBranchesByBranchIdBatchWindowRequest {
+    pub path: PatchV1kvV2storesByStoreIdBranchesByBranchIdBatchWindowRequestPath,
+    #[validate(nested)]
+    pub body: BatchWindowMRequestBody,
+}
+impl PatchV1kvV2storesByStoreIdBranchesByBranchIdBatchWindowRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Store200Response2Branch>::json_with_diagnostics(
+                    req,
+                )
+                .await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Unauthorized(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::PaymentRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::RequestTimeout(
+                data,
+            ));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::ContentTooLarge(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::UpgradeRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::TooManyRequests(
+                data,
+            ));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1kvV2storesByStoreIdBranchesResponse::Unknown);
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum RequestRequestBody {
+    #[default]
+    Object(RequestRequestBodyObject),
+    Object2(RequestRequestBodyObject2),
+    Object3(RequestRequestBodyObject3),
+    Operation(RequestRequestBodyOperation),
+    Operation2(RequestRequestBodyOperation2),
+    Object4(RequestRequestBodyObject4),
+}
+impl RequestRequestBody {
+    pub fn object(key: String) -> Self {
+        Self::Object(RequestRequestBodyObject {
+            key,
+            ..Default::default()
+        })
+    }
+    pub fn object3(key: String) -> Self {
+        Self::Object3(RequestRequestBodyObject3 {
+            key,
+            ..Default::default()
+        })
+    }
+    pub fn operation(operation: String) -> Self {
+        Self::Operation(RequestRequestBodyOperation {
+            operation,
+            ..Default::default()
+        })
+    }
+    pub fn operation2(operation: String) -> Self {
+        Self::Operation2(RequestRequestBodyOperation2 {
+            operation,
+            ..Default::default()
+        })
+    }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1kvV2storesByStoreIdBranchesByBranchIdRequestRequestPath {
+    pub store_id: uuid::Uuid,
+    pub branch_id: uuid::Uuid,
+}
+/// Execute a binary KV operation
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1kvV2storesByStoreIdBranchesByBranchIdRequestRequest {
+    pub path: PostV1kvV2storesByStoreIdBranchesByBranchIdRequestRequestPath,
+    pub body: RequestRequestBody,
+}
+impl PostV1kvV2storesByStoreIdBranchesByBranchIdRequestRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Request200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::BadRequest(data),
+            );
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::Unauthorized(data),
+            );
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::PaymentRequired(data),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::RequestTimeout(data),
+            );
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::ContentTooLarge(data),
+            );
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::UpgradeRequired(data),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::TooManyRequests(data),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::InternalServerError(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::ServiceUnavailable(
+                    data,
+                ),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse::Unknown);
+    }
+}
+/// Response types for postV1KvV2StoresByStoreIdBranchesByBranchIdRequest
+#[derive(Debug, Clone)]
+pub enum PostV1kvV2storesByStoreIdBranchesByBranchIdRequestResponse {
+    ///200: Response for status 200
+    Ok(Request200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ForkRequestBody {
+    pub id: uuid::Uuid,
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub name: String,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1kvV2storesByStoreIdBranchesByBranchIdForkRequestPath {
+    pub store_id: uuid::Uuid,
+    pub branch_id: uuid::Uuid,
+}
+/// Create a copy-on-write KV branch
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1kvV2storesByStoreIdBranchesByBranchIdForkRequest {
+    pub path: PostV1kvV2storesByStoreIdBranchesByBranchIdForkRequestPath,
+    #[validate(nested)]
+    pub body: ForkRequestBody,
+}
+impl PostV1kvV2storesByStoreIdBranchesByBranchIdForkRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Store200Response2Branch>::json_with_diagnostics(
+                    req,
+                )
+                .await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::Ok(
+                data,
+            ));
+        }
+        if status == http::StatusCode::ACCEPTED {
+            let data =
+                oas3_gen_support::Diagnostics::<Store200Response2Branch>::json_with_diagnostics(
+                    req,
+                )
+                .await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::Accepted(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::PaymentRequired(data),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::RequestTimeout(data),
+            );
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::ContentTooLarge(data),
+            );
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::UnprocessableEntity(data),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::UpgradeRequired(data),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::TooManyRequests(data),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::InternalServerError(data),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::ServiceUnavailable(data),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse::Unknown);
+    }
+}
+/// Response types for postV1KvV2StoresByStoreIdBranchesByBranchIdFork
+#[derive(Debug, Clone)]
+pub enum PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse {
+    ///200: Response for status 200
+    Ok(Store200Response2Branch),
+    ///202: Response for status 202
+    Accepted(Store200Response2Branch),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
 /// Returns managed PostgreSQL databases for the workspace with plan and runtime status metadata.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetV1kaikiDatabasesRequest {}
@@ -11509,7 +13170,7 @@ impl GetV1kaikiDatabasesByIdBranchesRequest {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data =
-                oas3_gen_support::Diagnostics::<Branch200Response>::json_with_diagnostics(req)
+                oas3_gen_support::Diagnostics::<Branch200Response2>::json_with_diagnostics(req)
                     .await?;
             return Ok(GetV1kaikiDatabasesByIdBranchesResponse::Ok(data));
         }
@@ -11603,7 +13264,7 @@ impl GetV1kaikiDatabasesByIdBranchesRequest {
 #[derive(Debug, Clone)]
 pub enum GetV1kaikiDatabasesByIdBranchesResponse {
     ///200: Response for status 200
-    Ok(Branch200Response),
+    Ok(Branch200Response2),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -11639,7 +13300,7 @@ pub enum GetV1kaikiDatabasesByIdBranchesResponse {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct BranchRequestBody {
+pub struct BranchRequestBody2 {
     #[validate(length(min = 1u64, max = 63u64))]
     pub name: String,
     #[serde(rename = "parentBranchId")]
@@ -11660,7 +13321,7 @@ pub struct PostV1kaikiDatabasesByIdBranchesRequestPath {
 pub struct PostV1kaikiDatabasesByIdBranchesRequest {
     pub path: PostV1kaikiDatabasesByIdBranchesRequestPath,
     #[validate(nested)]
-    pub body: BranchRequestBody,
+    pub body: BranchRequestBody2,
 }
 impl PostV1kaikiDatabasesByIdBranchesRequest {
     /// Parse the HTTP response into the response enum.
@@ -11670,7 +13331,7 @@ impl PostV1kaikiDatabasesByIdBranchesRequest {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data =
-                oas3_gen_support::Diagnostics::<Branch200Response2>::json_with_diagnostics(req)
+                oas3_gen_support::Diagnostics::<Branch200Response3>::json_with_diagnostics(req)
                     .await?;
             return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Ok(data));
         }
@@ -11762,7 +13423,7 @@ impl PostV1kaikiDatabasesByIdBranchesRequest {
 #[derive(Debug, Clone)]
 pub enum PostV1kaikiDatabasesByIdBranchesResponse {
     ///200: Response for status 200
-    Ok(Branch200Response2),
+    Ok(Branch200Response3),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -11814,7 +13475,7 @@ impl GetV1kaikiDatabasesByIdBranchesByBranchIdRequest {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data =
-                oas3_gen_support::Diagnostics::<Branch200Response2>::json_with_diagnostics(req)
+                oas3_gen_support::Diagnostics::<Branch200Response3>::json_with_diagnostics(req)
                     .await?;
             return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Ok(data));
         }
@@ -15548,12 +17209,15 @@ pub enum ApiErrorLimitDetailsBillingV2meterModuleKey {
     Deployment,
     #[serde(rename = "kaiki")]
     Kaiki,
+    #[serde(rename = "kv")]
+    Kv,
 }
 impl core::fmt::Display for ApiErrorLimitDetailsBillingV2meterModuleKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Deployment => write!(f, "deployment"),
             Self::Kaiki => write!(f, "kaiki"),
+            Self::Kv => write!(f, "kv"),
         }
     }
 }
@@ -18394,6 +20058,233 @@ impl core::fmt::Display for Project200Response3GitProvider {
         }
     }
 }
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Project200Response3DeploymentPreviewBuildQueueObjectBlockingDeployment {
+    pub id: uuid::Uuid,
+    #[serde(rename = "commitSha")]
+    #[validate(
+        length(min = 7u64, max = 40u64),
+        regex(path = "REGEX_ADMIT_REQUEST_BODY2_COMMIT_SHA")
+    )]
+    pub commit_sha: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Project200Response3DeploymentPreviewBuildQueueObject {
+    #[serde(
+        deserialize_with = "Project200Response3DeploymentPreviewBuildQueueObject::deserialize_const_state"
+    )]
+    #[serde(
+        serialize_with = "Project200Response3DeploymentPreviewBuildQueueObject::serialize_const_state"
+    )]
+    #[default("WAITING".to_string())]
+    pub state: String,
+    #[serde(rename = "blockingDeployment")]
+    #[validate(nested)]
+    pub blocking_deployment: Project200Response3DeploymentPreviewBuildQueueObjectBlockingDeployment,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl Project200Response3DeploymentPreviewBuildQueueObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_state<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"WAITING\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_state<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"WAITING\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Project200Response3DeploymentPreviewBuildQueueObject2 {
+    #[serde(
+        deserialize_with = "Project200Response3DeploymentPreviewBuildQueueObject2::deserialize_const_state"
+    )]
+    #[serde(
+        serialize_with = "Project200Response3DeploymentPreviewBuildQueueObject2::serialize_const_state"
+    )]
+    #[default("SUPERSEDED".to_string())]
+    pub state: String,
+    #[serde(rename = "replacementDeployment")]
+    #[validate(nested)]
+    pub replacement_deployment:
+        Project200Response3DeploymentPreviewBuildQueueObjectBlockingDeployment,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl Project200Response3DeploymentPreviewBuildQueueObject2 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_state<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"SUPERSEDED\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_state<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"SUPERSEDED\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Project200Response3DeploymentPreviewBuildQueueState {
+    #[serde(
+        deserialize_with = "Project200Response3DeploymentPreviewBuildQueueState::deserialize_const_state"
+    )]
+    #[serde(
+        serialize_with = "Project200Response3DeploymentPreviewBuildQueueState::serialize_const_state"
+    )]
+    #[default("MANUAL_OVERRIDE".to_string())]
+    pub state: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl Project200Response3DeploymentPreviewBuildQueueState {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_state<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String = serde_json::from_str::<String>("\"MANUAL_OVERRIDE\"")
+            .map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_state<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String = serde_json::from_str::<String>("\"MANUAL_OVERRIDE\"")
+            .map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Project200Response3DeploymentPreviewBuildQueue {
+    #[default]
+    Object(Project200Response3DeploymentPreviewBuildQueueObject),
+    Object2(Project200Response3DeploymentPreviewBuildQueueObject2),
+    State(Project200Response3DeploymentPreviewBuildQueueState),
+}
+impl Project200Response3DeploymentPreviewBuildQueue {
+    pub fn object(
+        blocking_deployment: Project200Response3DeploymentPreviewBuildQueueObjectBlockingDeployment,
+    ) -> Self {
+        Self::Object(Project200Response3DeploymentPreviewBuildQueueObject {
+            blocking_deployment,
+            ..Default::default()
+        })
+    }
+    pub fn object2(
+        replacement_deployment: Project200Response3DeploymentPreviewBuildQueueObjectBlockingDeployment,
+    ) -> Self {
+        Self::Object2(Project200Response3DeploymentPreviewBuildQueueObject2 {
+            replacement_deployment,
+            ..Default::default()
+        })
+    }
+    pub fn state(state: String) -> Self {
+        Self::State(Project200Response3DeploymentPreviewBuildQueueState {
+            state,
+            ..Default::default()
+        })
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Project200Response3DeploymentLayerTarget {
     #[serde(rename = "STATIC")]
@@ -18418,10 +20309,38 @@ pub struct Project200Response3DeploymentLayer {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Project200Response3DeploymentPreviewScreenshotStatus {
+    #[serde(rename = "READY")]
+    #[default]
+    Ready,
+    #[serde(rename = "PENDING")]
+    Pending,
+    #[serde(rename = "FAILED")]
+    Failed,
+    #[serde(rename = "UNAVAILABLE")]
+    Unavailable,
+}
+impl core::fmt::Display for Project200Response3DeploymentPreviewScreenshotStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Ready => write!(f, "READY"),
+            Self::Pending => write!(f, "PENDING"),
+            Self::Failed => write!(f, "FAILED"),
+            Self::Unavailable => write!(f, "UNAVAILABLE"),
+        }
+    }
+}
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct Project200Response3Deployment {
     pub id: uuid::Uuid,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "previewBuildQueue"
+    )]
+    pub preview_build_queue: Option<Option<Project200Response3DeploymentPreviewBuildQueue>>,
     #[serde(rename = "isPreview")]
     pub is_preview: bool,
     #[serde(rename = "isRollback")]
@@ -18459,6 +20378,8 @@ pub struct Project200Response3Deployment {
     )]
     #[serialize_always]
     pub preview_screenshot_url: Option<String>,
+    #[serde(rename = "previewScreenshotStatus")]
+    pub preview_screenshot_status: Option<Project200Response3DeploymentPreviewScreenshotStatus>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -18672,6 +20593,8 @@ pub struct Project200Response3 {
     )]
     #[serialize_always]
     pub prioritize_production_builds: Option<bool>,
+    #[serde(rename = "commonBuildCompute")]
+    pub common_build_compute: Option<bool>,
     #[serde(rename = "previewProtectionEnabled")]
     pub preview_protection_enabled: bool,
     #[serde(deserialize_with = "Option::deserialize", rename = "detectedFramework")]
@@ -19957,6 +21880,22 @@ impl core::fmt::Display for Deployment200ResponseRequestedBuildTier {
         }
     }
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Deployment200ResponseBuildExecutionContract {
+    #[serde(rename = "COMMON_COMPUTE")]
+    #[default]
+    CommonCompute,
+    #[serde(rename = "LEGACY_RECIPE")]
+    LegacyRecipe,
+}
+impl core::fmt::Display for Deployment200ResponseBuildExecutionContract {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::CommonCompute => write!(f, "COMMON_COMPUTE"),
+            Self::LegacyRecipe => write!(f, "LEGACY_RECIPE"),
+        }
+    }
+}
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct Deployment200ResponseProject {
@@ -20032,6 +21971,12 @@ pub struct Deployment200ResponseProject {
 )]
 pub struct Deployment200Response {
     pub id: uuid::Uuid,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "previewBuildQueue"
+    )]
+    pub preview_build_queue: Option<Option<Project200Response3DeploymentPreviewBuildQueue>>,
     #[serde(deserialize_with = "Option::deserialize", rename = "serviceId")]
     #[serialize_always]
     pub service_id: Option<uuid::Uuid>,
@@ -20189,6 +22134,12 @@ pub struct Deployment200Response {
     #[serde(deserialize_with = "Option::deserialize", rename = "actualBuildTier")]
     #[serialize_always]
     pub actual_build_tier: Option<Deployment200ResponseRequestedBuildTier>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "buildExecutionContract"
+    )]
+    pub build_execution_contract: Option<Option<Deployment200ResponseBuildExecutionContract>>,
     #[serde(rename = "buildTierFallback")]
     pub build_tier_fallback: bool,
     #[serde(rename = "buildPriority")]
@@ -20231,6 +22182,8 @@ pub struct Deployment200Response {
     )]
     #[serialize_always]
     pub preview_screenshot_url: Option<String>,
+    #[serde(rename = "previewScreenshotStatus")]
+    pub preview_screenshot_status: Option<Project200Response3DeploymentPreviewScreenshotStatus>,
     pub project: Deployment200ResponseProject,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
@@ -20241,6 +22194,12 @@ pub struct Deployment200Response {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct Project200Response6Deployment {
     pub id: uuid::Uuid,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "previewBuildQueue"
+    )]
+    pub preview_build_queue: Option<Option<Project200Response3DeploymentPreviewBuildQueue>>,
     #[serde(rename = "isPreview")]
     pub is_preview: bool,
     #[serde(rename = "isRollback")]
@@ -21679,6 +23638,905 @@ impl ComputeConfig200Response {
         serde::Serialize::serialize(value, serializer)
     }
 }
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct RegionResponseItem {
+    #[validate(regex(path = "REGEX_STORE_REQUEST_BODY_REGION"))]
+    pub id: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct RegionResponse {
+    #[validate(nested)]
+    pub regions: Vec<RegionResponseItem>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Store200ResponseStore {
+    pub id: uuid::Uuid,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "mainBranchId")]
+    #[serialize_always]
+    pub main_branch_id: Option<uuid::Uuid>,
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub name: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Store200Response {
+    #[validate(nested)]
+    pub stores: Vec<Store200ResponseStore>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub next: Option<uuid::Uuid>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Store200Response2BranchState {
+    #[serde(rename = "PENDING")]
+    #[default]
+    Pending,
+    #[serde(rename = "READY")]
+    Ready,
+    #[serde(rename = "FAILED")]
+    Failed,
+}
+impl core::fmt::Display for Store200Response2BranchState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "PENDING"),
+            Self::Ready => write!(f, "READY"),
+            Self::Failed => write!(f, "FAILED"),
+        }
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Store200Response2Branch {
+    pub state: Store200Response2BranchState,
+    pub id: uuid::Uuid,
+    #[serde(rename = "storeId")]
+    pub store_id: uuid::Uuid,
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub name: String,
+    #[validate(regex(path = "REGEX_STORE_REQUEST_BODY_REGION"))]
+    pub region: String,
+    #[serde(rename = "batchWindowMs")]
+    #[validate(range(min = 1i64, max = 3_600_000i64))]
+    pub batch_window_ms: i64,
+    #[serde(rename = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "configurationEffectiveAt")]
+    pub configuration_effective_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Store200Response2 {
+    #[validate(nested)]
+    pub store: Store200ResponseStore,
+    #[validate(nested)]
+    pub branch: Store200Response2Branch,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Branch200Response {
+    #[validate(nested)]
+    pub branches: Vec<Store200Response2Branch>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub next: Option<uuid::Uuid>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RequestRequestBodyObject {
+    #[serde(deserialize_with = "RequestRequestBodyObject::deserialize_const_operation")]
+    #[serde(serialize_with = "RequestRequestBodyObject::serialize_const_operation")]
+    #[default("GET".to_string())]
+    pub operation: String,
+    #[validate(
+        length(max = 1_398_104u64),
+        regex(path = "REGEX_REQUEST_REQUEST_BODY_OBJECT_KEY")
+    )]
+    pub key: String,
+}
+impl RequestRequestBodyObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_operation<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"GET\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_operation<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"GET\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum RequestRequestBodyObject2Durability {
+    #[serde(rename = "BUFFERED")]
+    #[default]
+    Buffered,
+    #[serde(rename = "EXPLICIT_DURABLE")]
+    ExplicitDurable,
+}
+impl core::fmt::Display for RequestRequestBodyObject2Durability {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Buffered => write!(f, "BUFFERED"),
+            Self::ExplicitDurable => write!(f, "EXPLICIT_DURABLE"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RequestRequestBodyObject2 {
+    #[serde(deserialize_with = "RequestRequestBodyObject2::deserialize_const_operation")]
+    #[serde(serialize_with = "RequestRequestBodyObject2::serialize_const_operation")]
+    #[default("PUT".to_string())]
+    pub operation: String,
+    #[validate(
+        length(max = 1_398_104u64),
+        regex(path = "REGEX_REQUEST_REQUEST_BODY_OBJECT_KEY")
+    )]
+    pub key: String,
+    #[validate(
+        length(max = 1_398_104u64),
+        regex(path = "REGEX_REQUEST_REQUEST_BODY_OBJECT_KEY")
+    )]
+    pub value: String,
+    pub durability: Option<RequestRequestBodyObject2Durability>,
+}
+impl RequestRequestBodyObject2 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_operation<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"PUT\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_operation<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"PUT\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RequestRequestBodyObject3 {
+    #[serde(deserialize_with = "RequestRequestBodyObject3::deserialize_const_operation")]
+    #[serde(serialize_with = "RequestRequestBodyObject3::serialize_const_operation")]
+    #[default("DELETE".to_string())]
+    pub operation: String,
+    #[validate(
+        length(max = 1_398_104u64),
+        regex(path = "REGEX_REQUEST_REQUEST_BODY_OBJECT_KEY")
+    )]
+    pub key: String,
+    pub durability: Option<RequestRequestBodyObject2Durability>,
+}
+impl RequestRequestBodyObject3 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_operation<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"DELETE\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_operation<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"DELETE\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct RequestRequestBodyOperation {
+    #[serde(deserialize_with = "RequestRequestBodyOperation::deserialize_const_operation")]
+    #[serde(serialize_with = "RequestRequestBodyOperation::serialize_const_operation")]
+    #[default("FLUSH".to_string())]
+    pub operation: String,
+}
+impl RequestRequestBodyOperation {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_operation<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"FLUSH\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_operation<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"FLUSH\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct RequestRequestBodyOperation2 {
+    #[serde(deserialize_with = "RequestRequestBodyOperation2::deserialize_const_operation")]
+    #[serde(serialize_with = "RequestRequestBodyOperation2::serialize_const_operation")]
+    #[default("STATS".to_string())]
+    pub operation: String,
+}
+impl RequestRequestBodyOperation2 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_operation<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"STATS\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_operation<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"STATS\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RequestRequestBodyObject4 {
+    #[serde(deserialize_with = "RequestRequestBodyObject4::deserialize_const_operation")]
+    #[serde(serialize_with = "RequestRequestBodyObject4::serialize_const_operation")]
+    #[default("SCAN_KEYS".to_string())]
+    pub operation: String,
+    #[validate(
+        length(max = 1_398_104u64),
+        regex(path = "REGEX_REQUEST_REQUEST_BODY_OBJECT_KEY")
+    )]
+    pub prefix: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub after: Option<String>,
+    #[validate(range(min = 1i64, max = 1_024i64))]
+    pub limit: i64,
+    #[serde(rename = "maxBytes")]
+    #[validate(range(min = 1i64, max = 1_048_576i64))]
+    pub max_bytes: i64,
+}
+impl RequestRequestBodyObject4 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_operation<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"SCAN_KEYS\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_operation<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"SCAN_KEYS\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct Request200ResponseObject {
+    #[serde(deserialize_with = "Request200ResponseObject::deserialize_const_status")]
+    #[serde(serialize_with = "Request200ResponseObject::serialize_const_status")]
+    #[default("VALUE".to_string())]
+    pub status: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub value: Option<String>,
+}
+impl Request200ResponseObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_status<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"VALUE\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_status<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"VALUE\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct Request200ResponseObject2 {
+    #[serde(deserialize_with = "Request200ResponseObject2::deserialize_const_status")]
+    #[serde(serialize_with = "Request200ResponseObject2::serialize_const_status")]
+    #[default("WRITTEN".to_string())]
+    pub status: String,
+    pub durability: RequestRequestBodyObject2Durability,
+}
+impl Request200ResponseObject2 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_status<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"WRITTEN\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_status<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"WRITTEN\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct Request200ResponseStatus {
+    #[serde(deserialize_with = "Request200ResponseStatus::deserialize_const_status")]
+    #[serde(serialize_with = "Request200ResponseStatus::serialize_const_status")]
+    #[default("FLUSHED".to_string())]
+    pub status: String,
+}
+impl Request200ResponseStatus {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_status<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"FLUSHED\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_status<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"FLUSHED\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Request200ResponseObject3Stats {
+    #[serde(rename = "logicalBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub logical_bytes: i64,
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub keys: i64,
+    #[serde(rename = "customerBatches")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub customer_batches: i64,
+    #[serde(rename = "writeOperations")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub write_operations: i64,
+    #[serde(rename = "writeBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub write_bytes: i64,
+    #[serde(rename = "readOperations")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub read_operations: i64,
+    #[serde(rename = "bufferedOperations")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub buffered_operations: i64,
+    #[serde(rename = "bufferedBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub buffered_bytes: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Request200ResponseObject3 {
+    #[serde(deserialize_with = "Request200ResponseObject3::deserialize_const_status")]
+    #[serde(serialize_with = "Request200ResponseObject3::serialize_const_status")]
+    #[default("STATS".to_string())]
+    pub status: String,
+    #[validate(nested)]
+    pub stats: Request200ResponseObject3Stats,
+}
+impl Request200ResponseObject3 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_status<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"STATS\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_status<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"STATS\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Request200ResponseObject4 {
+    #[serde(deserialize_with = "Request200ResponseObject4::deserialize_const_status")]
+    #[serde(serialize_with = "Request200ResponseObject4::serialize_const_status")]
+    #[default("KEYS".to_string())]
+    pub status: String,
+    #[validate(length(max = 1_024u64))]
+    pub keys: Vec<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub next: Option<String>,
+}
+impl Request200ResponseObject4 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_status<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"KEYS\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_status<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"KEYS\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Request200ResponseObject5Code {
+    #[serde(rename = "REJECTED")]
+    #[default]
+    Rejected,
+    #[serde(rename = "BUSY")]
+    Busy,
+    #[serde(rename = "TOO_LARGE")]
+    TooLarge,
+    #[serde(rename = "INVALID")]
+    Invalid,
+    #[serde(rename = "STORAGE")]
+    Storage,
+    #[serde(rename = "OUTCOME_UNKNOWN")]
+    OutcomeUnknown,
+}
+impl core::fmt::Display for Request200ResponseObject5Code {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Rejected => write!(f, "REJECTED"),
+            Self::Busy => write!(f, "BUSY"),
+            Self::TooLarge => write!(f, "TOO_LARGE"),
+            Self::Invalid => write!(f, "INVALID"),
+            Self::Storage => write!(f, "STORAGE"),
+            Self::OutcomeUnknown => write!(f, "OUTCOME_UNKNOWN"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct Request200ResponseObject5 {
+    #[serde(deserialize_with = "Request200ResponseObject5::deserialize_const_status")]
+    #[serde(serialize_with = "Request200ResponseObject5::serialize_const_status")]
+    #[default("ERROR".to_string())]
+    pub status: String,
+    pub code: Request200ResponseObject5Code,
+}
+impl Request200ResponseObject5 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_status<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"ERROR\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_status<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"ERROR\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Request200Response {
+    #[default]
+    Object(Request200ResponseObject),
+    Object2(Request200ResponseObject2),
+    Status(Request200ResponseStatus),
+    Object3(Request200ResponseObject3),
+    Object4(Request200ResponseObject4),
+    Object5(Request200ResponseObject5),
+}
+impl Request200Response {
+    pub fn object(value: Option<String>) -> Self {
+        Self::Object(Request200ResponseObject {
+            value,
+            ..Default::default()
+        })
+    }
+    pub fn object2(durability: RequestRequestBodyObject2Durability) -> Self {
+        Self::Object2(Request200ResponseObject2 {
+            durability,
+            ..Default::default()
+        })
+    }
+    pub fn status(status: String) -> Self {
+        Self::Status(Request200ResponseStatus {
+            status,
+            ..Default::default()
+        })
+    }
+    pub fn object3(stats: Request200ResponseObject3Stats) -> Self {
+        Self::Object3(Request200ResponseObject3 {
+            stats,
+            ..Default::default()
+        })
+    }
+    pub fn object5(code: Request200ResponseObject5Code) -> Self {
+        Self::Object5(Request200ResponseObject5 {
+            code,
+            ..Default::default()
+        })
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, oas3_gen_support::Default)]
 pub enum Database200ResponseAllowedCuSize {
     #[default]
@@ -21992,6 +24850,738 @@ impl core::fmt::Display for Database200ResponseDatumEndpointStatus {
         }
     }
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumEndpointObservedStateEnum {
+    #[serde(rename = "pending")]
+    #[default]
+    Pending,
+    #[serde(rename = "scheduling")]
+    Scheduling,
+    #[serde(rename = "configuring")]
+    Configuring,
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "stopping")]
+    Stopping,
+    #[serde(rename = "stopped")]
+    Stopped,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "deleted")]
+    Deleted,
+}
+impl core::fmt::Display for Database200ResponseDatumEndpointObservedStateEnum {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "pending"),
+            Self::Scheduling => write!(f, "scheduling"),
+            Self::Configuring => write!(f, "configuring"),
+            Self::Running => write!(f, "running"),
+            Self::Stopping => write!(f, "stopping"),
+            Self::Stopped => write!(f, "stopped"),
+            Self::Failed => write!(f, "failed"),
+            Self::Deleted => write!(f, "deleted"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Database200ResponseDatumEndpointObservedState {
+    #[default]
+    Enum(Database200ResponseDatumEndpointObservedStateEnum),
+    #[serde(rename = "starting")]
+    #[serde(
+        deserialize_with = "Database200ResponseDatumEndpointObservedState::deserialize_const_starting"
+    )]
+    #[serde(
+        serialize_with = "Database200ResponseDatumEndpointObservedState::serialize_const_starting"
+    )]
+    Starting,
+}
+impl Database200ResponseDatumEndpointObservedState {
+    #[allow(
+        clippy::float_cmp,
+        reason = "schema numeric constants require exact equality"
+    )]
+    fn deserialize_const_starting<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<(), D::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: serde_json::Value =
+            serde_json::from_str("\"starting\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(())
+    }
+    fn serialize_const_starting<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
+        let value: serde_json::Value =
+            serde_json::from_str("\"starting\"").map_err(serde::ser::Error::custom)?;
+        serde::Serialize::serialize(&value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumRuntimeCapacityCurrentInstanceStatus {
+    #[serde(rename = "pending")]
+    #[default]
+    Pending,
+    #[serde(rename = "scheduling")]
+    Scheduling,
+    #[serde(rename = "configuring")]
+    Configuring,
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "stopping")]
+    Stopping,
+    #[serde(rename = "stopped")]
+    Stopped,
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl core::fmt::Display for Database200ResponseDatumRuntimeCapacityCurrentInstanceStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "pending"),
+            Self::Scheduling => write!(f, "scheduling"),
+            Self::Configuring => write!(f, "configuring"),
+            Self::Running => write!(f, "running"),
+            Self::Stopping => write!(f, "stopping"),
+            Self::Stopped => write!(f, "stopped"),
+            Self::Failed => write!(f, "failed"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeCapacityCurrentInstance {
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub applied_memory_bytes: Option<Option<i64>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub applied_millicpu: Option<Option<i64>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub desired_memory_bytes: Option<Option<i64>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub desired_millicpu: Option<Option<i64>>,
+    #[validate(range(min = -2_147_483_648i64, max = 2_147_483_647i64))]
+    pub generation: i64,
+    pub id: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub last_observed_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    pub placement_class: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub ready_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub requested_memory_bytes: Option<Option<i64>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub requested_millicpu: Option<Option<i64>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub scheduled_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    pub status: Database200ResponseDatumRuntimeCapacityCurrentInstanceStatus,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub stopped_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub termination_reason: Option<Option<String>>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumRuntimeCapacityDesiredState {
+    #[serde(rename = "running")]
+    #[default]
+    Running,
+    #[serde(rename = "stopped")]
+    Stopped,
+    #[serde(rename = "deleted")]
+    Deleted,
+}
+impl core::fmt::Display for Database200ResponseDatumRuntimeCapacityDesiredState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Running => write!(f, "running"),
+            Self::Stopped => write!(f, "stopped"),
+            Self::Deleted => write!(f, "deleted"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumRuntimeCapacityPolicyDownscalePolicy {
+    #[serde(rename = "graceful")]
+    #[default]
+    Graceful,
+    #[serde(rename = "balanced")]
+    Balanced,
+    #[serde(rename = "strict_savings")]
+    StrictSavings,
+}
+impl core::fmt::Display for Database200ResponseDatumRuntimeCapacityPolicyDownscalePolicy {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Graceful => write!(f, "graceful"),
+            Self::Balanced => write!(f, "balanced"),
+            Self::StrictSavings => write!(f, "strict_savings"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumRuntimeCapacityPolicyInheritanceState {
+    #[serde(rename = "database_defaults")]
+    #[default]
+    DatabaseDefaults,
+    #[serde(rename = "explicit_override")]
+    ExplicitOverride,
+}
+impl core::fmt::Display for Database200ResponseDatumRuntimeCapacityPolicyInheritanceState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::DatabaseDefaults => write!(f, "database_defaults"),
+            Self::ExplicitOverride => write!(f, "explicit_override"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumRuntimeCapacityPolicyReservationMode {
+    #[serde(rename = "best_effort")]
+    #[default]
+    BestEffort,
+    #[serde(rename = "guaranteed")]
+    Guaranteed,
+}
+impl core::fmt::Display for Database200ResponseDatumRuntimeCapacityPolicyReservationMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::BestEffort => write!(f, "best_effort"),
+            Self::Guaranteed => write!(f, "guaranteed"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeCapacityPolicy {
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub applied_defaults_resource_version: Option<Option<i64>>,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub current_defaults_resource_version: i64,
+    pub default_connection_mode: String,
+    pub defaults_outdated: bool,
+    pub downscale_policy: Database200ResponseDatumRuntimeCapacityPolicyDownscalePolicy,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub guaranteed_cu: Option<Option<f64>>,
+    pub id: String,
+    pub inheritance_state: Database200ResponseDatumRuntimeCapacityPolicyInheritanceState,
+    pub max_cu: f64,
+    pub min_cu: f64,
+    pub placement_class: String,
+    pub reservation_mode: Database200ResponseDatumRuntimeCapacityPolicyReservationMode,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub resource_version: i64,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub suspend_timeout_seconds: Option<Option<i64>>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumRuntimeCapacityRecentAttemptAttemptType {
+    #[serde(rename = "start")]
+    #[default]
+    Start,
+    #[serde(rename = "upscale")]
+    Upscale,
+    #[serde(rename = "downscale")]
+    Downscale,
+    #[serde(rename = "prewarm")]
+    Prewarm,
+    #[serde(rename = "reservation")]
+    Reservation,
+}
+impl core::fmt::Display for Database200ResponseDatumRuntimeCapacityRecentAttemptAttemptType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Start => write!(f, "start"),
+            Self::Upscale => write!(f, "upscale"),
+            Self::Downscale => write!(f, "downscale"),
+            Self::Prewarm => write!(f, "prewarm"),
+            Self::Reservation => write!(f, "reservation"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumRuntimeCapacityRecentAttemptStatus {
+    #[serde(rename = "requested")]
+    #[default]
+    Requested,
+    #[serde(rename = "waiting_capacity")]
+    WaitingCapacity,
+    #[serde(rename = "admitted")]
+    Admitted,
+    #[serde(rename = "applying")]
+    Applying,
+    #[serde(rename = "applied")]
+    Applied,
+    #[serde(rename = "rejected")]
+    Rejected,
+    #[serde(rename = "expired")]
+    Expired,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    #[serde(rename = "deferred")]
+    Deferred,
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl core::fmt::Display for Database200ResponseDatumRuntimeCapacityRecentAttemptStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Requested => write!(f, "requested"),
+            Self::WaitingCapacity => write!(f, "waiting_capacity"),
+            Self::Admitted => write!(f, "admitted"),
+            Self::Applying => write!(f, "applying"),
+            Self::Applied => write!(f, "applied"),
+            Self::Rejected => write!(f, "rejected"),
+            Self::Expired => write!(f, "expired"),
+            Self::Cancelled => write!(f, "cancelled"),
+            Self::Deferred => write!(f, "deferred"),
+            Self::Failed => write!(f, "failed"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeCapacityRecentAttempt {
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub admitted_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub applied_cu: Option<Option<f64>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub apply_started_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    #[validate(range(min = -2_147_483_648i64, max = 2_147_483_647i64))]
+    pub attempt_count: i64,
+    pub attempt_type: Database200ResponseDatumRuntimeCapacityRecentAttemptAttemptType,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub completed_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub endpoint_instance_id: Option<Option<String>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub from_cu: Option<Option<f64>>,
+    pub id: uuid::Uuid,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub operation_id: Option<Option<uuid::Uuid>>,
+    pub placement_class: String,
+    pub provider_details: serde_json::Value,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub reason_code: Option<Option<String>>,
+    pub requested_cu: f64,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub requested_memory_bytes: i64,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub requested_millicpu: i64,
+    pub status: Database200ResponseDatumRuntimeCapacityRecentAttemptStatus,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub wait_started_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumRuntimeCapacityReservationStatus {
+    #[serde(rename = "pending")]
+    #[default]
+    Pending,
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "releasing")]
+    Releasing,
+    #[serde(rename = "released")]
+    Released,
+    #[serde(rename = "failed")]
+    Failed,
+}
+impl core::fmt::Display for Database200ResponseDatumRuntimeCapacityReservationStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "pending"),
+            Self::Active => write!(f, "active"),
+            Self::Releasing => write!(f, "releasing"),
+            Self::Released => write!(f, "released"),
+            Self::Failed => write!(f, "failed"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeCapacityReservation {
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub consumed_memory_bytes: i64,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub consumed_millicpu: i64,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub expires_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    pub guaranteed_cu: f64,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub guaranteed_memory_bytes: i64,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub guaranteed_millicpu: i64,
+    pub id: uuid::Uuid,
+    pub placement_class: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub released_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    pub starts_at: chrono::DateTime<chrono::Utc>,
+    pub status: Database200ResponseDatumRuntimeCapacityReservationStatus,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeCapacity {
+    pub configured_cu: f64,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    #[validate(nested)]
+    pub current_instance: Option<Option<Database200ResponseDatumRuntimeCapacityCurrentInstance>>,
+    pub database_id: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub desired_cu: Option<Option<f64>>,
+    pub desired_state: Database200ResponseDatumRuntimeCapacityDesiredState,
+    pub endpoint_id: String,
+    pub observed_state: Database200ResponseDatumEndpointObservedStateEnum,
+    #[validate(nested)]
+    pub policy: Database200ResponseDatumRuntimeCapacityPolicy,
+    #[validate(nested)]
+    pub recent_attempts: Vec<Database200ResponseDatumRuntimeCapacityRecentAttempt>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    #[validate(nested)]
+    pub reservation: Option<Option<Database200ResponseDatumRuntimeCapacityReservation>>,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub resource_version: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject {
+    pub database_id: String,
+    pub endpoint_id: String,
+    #[default("database_create".to_string())]
+    pub kind: String,
+    pub main_branch_id: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject2 {
+    pub database_id: String,
+    pub deleted: bool,
+    #[default("database_delete".to_string())]
+    pub kind: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub revoked_credentials: Option<Option<i64>>,
+    pub status: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject3 {
+    #[default("database_update".to_string())]
+    pub kind: String,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub resource_version: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject4 {
+    pub adopted: bool,
+    pub branch_id: String,
+    pub endpoint_id: String,
+    #[default("branch_create".to_string())]
+    pub kind: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject5 {
+    pub adopted: bool,
+    pub branch_id: String,
+    pub endpoint_id: String,
+    #[default("branch_restore".to_string())]
+    pub kind: String,
+    pub resolved_lsn: String,
+    pub source_branch_id: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject6 {
+    pub adopted: bool,
+    pub branch_id: String,
+    pub deleted: bool,
+    #[default("branch_delete".to_string())]
+    pub kind: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject7 {
+    pub endpoint_id: String,
+    #[default("endpoint_start".to_string())]
+    pub kind: String,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub runtime_generation: i64,
+    pub status: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject8 {
+    pub endpoint_id: String,
+    #[default("endpoint_stop".to_string())]
+    pub kind: String,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub runtime_generation: i64,
+    pub status: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject9 {
+    pub applied_cu: f64,
+    pub endpoint_id: String,
+    #[default("endpoint_resize".to_string())]
+    pub kind: String,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub policy_resource_version: i64,
+    pub previous_cu: f64,
+    pub target_cu: f64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject10 {
+    pub adopted: bool,
+    pub credential_id: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub generation: Option<Option<i64>>,
+    #[default("credential".to_string())]
+    pub kind: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub revoked: Option<Option<bool>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject11 {
+    #[default("capacity_reservation".to_string())]
+    pub kind: String,
+    pub reservation_id: String,
+    pub status: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject12 {
+    pub access: String,
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub endpoint_count: i64,
+    pub generation: String,
+    #[default("resource_control".to_string())]
+    pub kind: String,
+    pub status: String,
+    pub target_id: String,
+    pub target_type: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject13 {
+    #[default("owner_transition".to_string())]
+    pub kind: String,
+    pub status: String,
+    pub transition_id: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200ResponseDatumRuntimeOperationResultObject14 {
+    pub data: serde_json::Value,
+    #[default("generic".to_string())]
+    pub kind: String,
+    pub operation_type: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Database200ResponseDatumRuntimeOperationResult {
+    #[default]
+    Object(Database200ResponseDatumRuntimeOperationResultObject),
+    Object2(Database200ResponseDatumRuntimeOperationResultObject2),
+    Object3(Database200ResponseDatumRuntimeOperationResultObject3),
+    Object4(Database200ResponseDatumRuntimeOperationResultObject4),
+    Object5(Database200ResponseDatumRuntimeOperationResultObject5),
+    Object6(Database200ResponseDatumRuntimeOperationResultObject6),
+    Object7(Database200ResponseDatumRuntimeOperationResultObject7),
+    Object8(Database200ResponseDatumRuntimeOperationResultObject8),
+    Object9(Database200ResponseDatumRuntimeOperationResultObject9),
+    Object10(Database200ResponseDatumRuntimeOperationResultObject10),
+    Object11(Database200ResponseDatumRuntimeOperationResultObject11),
+    Object12(Database200ResponseDatumRuntimeOperationResultObject12),
+    Object13(Database200ResponseDatumRuntimeOperationResultObject13),
+    Object14(Database200ResponseDatumRuntimeOperationResultObject14),
+}
+impl Database200ResponseDatumRuntimeOperationResult {
+    pub fn object3(resource_version: i64) -> Self {
+        Self::Object3(Database200ResponseDatumRuntimeOperationResultObject3 {
+            resource_version,
+            ..Default::default()
+        })
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200ResponseDatumRuntimeOperationStatus {
+    #[serde(rename = "pending")]
+    #[default]
+    Pending,
+    #[serde(rename = "running")]
+    Running,
+    #[serde(rename = "succeeded")]
+    Succeeded,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+}
+impl core::fmt::Display for Database200ResponseDatumRuntimeOperationStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "pending"),
+            Self::Running => write!(f, "running"),
+            Self::Succeeded => write!(f, "succeeded"),
+            Self::Failed => write!(f, "failed"),
+            Self::Cancelled => write!(f, "cancelled"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntimeOperation {
+    #[validate(range(min = -2_147_483_648i64, max = 2_147_483_647i64))]
+    pub attempt: i64,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub causation_id: Option<Option<String>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub completed_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    pub correlation_id: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub error_code: Option<Option<String>>,
+    pub error_details: Option<serde_json::Value>,
+    pub id: String,
+    pub idempotency_scope: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub lease_expires_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    pub operation_type: String,
+    pub phase: String,
+    pub request_hash: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub resource_generation: Option<Option<i64>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub resource_id: Option<Option<String>>,
+    pub resource_type: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub result: Option<Option<Database200ResponseDatumRuntimeOperationResult>>,
+    pub retryable: bool,
+    pub source: String,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub started_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
+    pub status: Database200ResponseDatumRuntimeOperationStatus,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Database200ResponseDatumRuntime {
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    #[validate(nested)]
+    pub capacity: Option<Database200ResponseDatumRuntimeCapacity>,
+    #[validate(nested)]
+    pub operations: Vec<Database200ResponseDatumRuntimeOperation>,
+    pub unavailable: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -22058,6 +25648,15 @@ pub struct Database200ResponseDatum {
     #[serde(deserialize_with = "Option::deserialize", rename = "endpointStatus")]
     #[serialize_always]
     pub endpoint_status: Option<Database200ResponseDatumEndpointStatus>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "endpointObservedState"
+    )]
+    pub endpoint_observed_state: Option<Option<Database200ResponseDatumEndpointObservedState>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    #[validate(nested)]
+    pub runtime: Option<Option<Database200ResponseDatumRuntime>>,
     #[serde(deserialize_with = "Option::deserialize", rename = "lastActive")]
     #[serialize_always]
     pub last_active: Option<String>,
@@ -22198,6 +25797,10 @@ pub enum Database200Response3Permission {
     DomainsRead,
     #[serde(rename = "domains.write")]
     DomainsWrite,
+    #[serde(rename = "kv.read")]
+    KvRead,
+    #[serde(rename = "kv.write")]
+    KvWrite,
     #[serde(rename = "kaiki.databases.read")]
     KaikiDatabasesRead,
     #[serde(rename = "kaiki.databases.write")]
@@ -22238,6 +25841,8 @@ impl core::fmt::Display for Database200Response3Permission {
             Self::EnvMaterialize => write!(f, "env.materialize"),
             Self::DomainsRead => write!(f, "domains.read"),
             Self::DomainsWrite => write!(f, "domains.write"),
+            Self::KvRead => write!(f, "kv.read"),
+            Self::KvWrite => write!(f, "kv.write"),
             Self::KaikiDatabasesRead => write!(f, "kaiki.databases.read"),
             Self::KaikiDatabasesWrite => write!(f, "kaiki.databases.write"),
             Self::KaikiBranchesRead => write!(f, "kaiki.branches.read"),
@@ -22506,37 +26111,12 @@ pub struct Start200ResponseResource {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum Start200ResponseStatus {
-    #[serde(rename = "pending")]
-    #[default]
-    Pending,
-    #[serde(rename = "running")]
-    Running,
-    #[serde(rename = "succeeded")]
-    Succeeded,
-    #[serde(rename = "failed")]
-    Failed,
-    #[serde(rename = "cancelled")]
-    Cancelled,
-}
-impl core::fmt::Display for Start200ResponseStatus {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Pending => write!(f, "pending"),
-            Self::Running => write!(f, "running"),
-            Self::Succeeded => write!(f, "succeeded"),
-            Self::Failed => write!(f, "failed"),
-            Self::Cancelled => write!(f, "cancelled"),
-        }
-    }
-}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct Start200Response {
     pub operation_id: uuid::Uuid,
     pub operation_type: String,
     pub resource: Start200ResponseResource,
-    pub status: Start200ResponseStatus,
+    pub status: Database200ResponseDatumRuntimeOperationStatus,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -22605,12 +26185,12 @@ pub struct Connection200Response {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-pub type Branch200Response = Vec<ManagedDatabaseBranchListItem>;
+pub type Branch200Response2 = Vec<ManagedDatabaseBranchListItem>;
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct Branch200Response2 {
+pub struct Branch200Response3 {
     #[serde(default, with = "serde_with::rust::double_option")]
     pub ancestor_lsn: Option<Option<String>>,
     #[serde(default, with = "serde_with::rust::double_option")]
@@ -25145,77 +28725,6 @@ impl core::fmt::Display for FailBeforeSourceRequestBodyErrorCode {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum FailBeforeSourceRequestBodyDiagnosticDetailsObject4ConflictType {
-    #[serde(rename = "ACTIVE_PROJECT")]
-    #[default]
-    ActiveProject,
-    #[serde(rename = "DELETED_PROJECT")]
-    DeletedProject,
-    #[serde(rename = "OTHER")]
-    Other,
-}
-impl core::fmt::Display for FailBeforeSourceRequestBodyDiagnosticDetailsObject4ConflictType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::ActiveProject => write!(f, "ACTIVE_PROJECT"),
-            Self::DeletedProject => write!(f, "DELETED_PROJECT"),
-            Self::Other => write!(f, "OTHER"),
-        }
-    }
-}
-/// State or uniqueness conflict details.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject4 {
-    pub field: Option<String>,
-    #[serde(rename = "resourceType")]
-    pub resource_type: String,
-    #[serde(rename = "conflictType")]
-    pub conflict_type: FailBeforeSourceRequestBodyDiagnosticDetailsObject4ConflictType,
-    #[serde(rename = "gracePeriodDays")]
-    pub grace_period_days: Option<f64>,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-/// Structured error details. Shape depends on the error code.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(untagged)]
-pub enum FailBeforeSourceRequestBodyDiagnosticDetails {
-    /// Quota or plan-limit failure details.
-    #[default]
-    Object(ApiErrorLimitDetails),
-    /// Validation failure details.
-    Object2(ApiErrorValidationDetails),
-    /// Resource lookup failure details.
-    ResourceType(ApiErrorResourceDetails),
-    /// Feature entitlement failure details.
-    Object3(ApiErrorFeatureDetails),
-    /// State or uniqueness conflict details.
-    Object4(FailBeforeSourceRequestBodyDiagnosticDetailsObject4),
-    /// DNS records that block an ONREZA-managed hostname route.
-    Object5(ApiErrorDnsRoutingRecordConflictDetails),
-    /// External Git provider credential recovery details.
-    Object6(ApiErrorProviderReconnectDetails),
-    /// ONREZA Functions publication failure details.
-    Object7(ApiErrorFunctionPublishFailureDetails),
-    Object8(std::collections::HashMap<String, Box<T010>>),
-}
-impl FailBeforeSourceRequestBodyDiagnosticDetails {
-    /// Validation failure details.
-    pub fn object2() -> Self {
-        Self::Object2(ApiErrorValidationDetails::default())
-    }
-    /// Resource lookup failure details.
-    pub fn resource_type(resource_type: String) -> Self {
-        Self::ResourceType(ApiErrorResourceDetails {
-            resource_type,
-            ..Default::default()
-        })
-    }
-}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -25230,7 +28739,7 @@ pub struct FailBeforeSourceRequestBodyDiagnostic {
     #[validate(length(min = 1u64, max = 4_096u64))]
     pub message: String,
     /// Structured error details. Shape depends on the error code.
-    pub details: Option<FailBeforeSourceRequestBodyDiagnosticDetails>,
+    pub details: Option<std::collections::HashMap<String, Box<T010>>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct FailBeforeSource200Response {

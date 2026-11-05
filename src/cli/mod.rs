@@ -22,6 +22,8 @@ pub mod functions_handler;
 mod functions_handler_tests;
 pub mod kv;
 pub mod kv_handler;
+pub mod kv_v2;
+pub mod kv_v2_handler;
 pub mod preview;
 pub mod projects;
 pub mod projects_handler;
@@ -113,6 +115,9 @@ pub enum Command {
 
     /// Manage local KV store
     Kv(KvArgs),
+
+    /// Manage remote binary KV v2 Stores and branches
+    KvV2(kv_v2::KvV2Args),
 
     /// Log in to ONREZA platform
     Login,

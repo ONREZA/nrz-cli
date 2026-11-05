@@ -137,6 +137,7 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | `nrz deploy-set` | Принимает один выбранный набор Services и ждёт переключение полного состава; остальные Services сохраняют exact accepted references. | `--project-id`, `--environment`, `--all` либо повторяемый `--service-id`; повторяемый `--local SERVICE_ID=PATH` для локальных Sources, `--expected-generation`, `--idempotency-key`. Receipt в `.onreza/deployment-sets` сохраняет первоначальный запрос для unknown-outcome retry. |
 | `nrz rollback` | Запрашивает новую активацию сохранённого immutable release в выбранном Environment. | `--release-id` или `--composition-id` для активации либо `--list` для списка; `--environment`, `--project-id`, `--service-id`, `--dir`; для `--list` paired cursors `--before-created-at`/`--before-release-id` и `--before-composition-created-at`/`--before-composition-id`. По умолчанию ждёт финального наблюдения текущего rollout; `--finish-observation-early` завершает это наблюдение раньше для этой операции, сохраняя grace и drain. Операция асинхронна; фактический active определяется Edge receipt. |
 | `nrz functions check [DIR]` | Загружает Functions через точный STABLE runtime и проверяет `onreza.rules.toml`. | Runtime скачивается в пользовательский cache при первом Function-check; ошибка `ONREZA_FUNCTIONS_NOT_FOUND`, если нет function entries и rules-файла. |
+| `nrz kv-v2 ...` | Remote binary KV Stores и branches через `/v1/kv-v2`. | `regions`, `stores`, `branches --store <UUID>`, `data --store <UUID> --branch <UUID>`; общий workspace/token resolver. |
 | `nrz kv ...` | Локальный KV store для dev/emulator state. | Не ходит в API. Хранилище: `.onreza/data/kv.<env>.json` от текущей директории; default env namespace `development`. |
 | `nrz db ...` | Managed PostgreSQL (kaiki) операции. | Management идет через `/v1/kaiki/databases`; выбранный Product видит собственные DB и явно связанные через `projectAttachments`. `query` и `schema` получают connection URI через API и выполняют SQL локально из `nrz`. Exact DB ID задаёт ресурс напрямую с проверкой API authority; выбор по имени/config или auto-resolve требует единственного совпадения в workspace либо выбранном Product. Binding не выводится из Git ref или branch name. |
 | `nrz env ...` | Безопасное управление platform env vars, проверка и запуск команд с материализованным snapshot. | `--project-id` global внутри группы; точный context выбирается через `--environment`/`NRZ_ENVIRONMENT`/`nrz context`. Dotenv pull/push отсутствуют. |
@@ -206,10 +207,23 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | `nrz kv delete <KEY>` | Удаляет local KV key. | `--env`. |
 | `nrz kv list` | Список local KV keys. | `--env`, `--prefix`, `--limit` (default 100). |
 | `nrz kv clear` | Удаляет весь local KV файл выбранного env namespace. | `--env`, `--force` обязателен для реальной очистки. |
+| `nrz kv-v2 regions` | Доступные регионы для Store или пустой branch. | `--store <UUID>` ограничивает выбор совместимыми регионами Store. |
+| `nrz kv-v2 stores list/create/info/delete` | Управляет remote Stores и основной branch. | `list --after <UUID> --limit <1..100>`; `create <NAME> --region <ID> [--id <UUID>] [--main-branch-id <UUID>] [--batch-window-ms <MS>]`; `info/delete <UUID>`, для non-interactive delete обязателен `--force`. |
+| `nrz kv-v2 branches --store <UUID> ...` | Список, пустая branch, info, retirement, CoW fork и batching. | `list --after <UUID> --limit <1..100>`; `create <NAME> --region <ID> [--id <UUID>] [--batch-window-ms <MS>]`; `info/delete <UUID>`; `fork <SOURCE_UUID> <NAME> [--id <UUID>]`; `batch-window <UUID> <MS>`. Delete требует `--force` в non-interactive. Fork может вернуть `PENDING`; готовность читается через `info`. |
+| `nrz kv-v2 data --store <UUID> --branch <UUID> ...` | Binary get/put/delete, ограниченный keys scan, flush и stats. | `get <KEY>`, `put <KEY> <VALUE> [--durable]`, `delete <KEY> [--durable]`, `keys [--prefix <KEY>] [--after <KEY>] [--limit <1..1024>] [--max-bytes <1..1048576>]`, `flush`, `stats`. `--base64` у get/put/delete/keys задаёт canonical padded base64 входов; иначе входы UTF-8. Ответы сохраняют wire base64. |
 | `nrz functions check [DIR]` | Загружает local Functions точным platform runtime и проверяет rules payload до publish/deploy. | JSON output включает runtime identity, загруженные entrypoints и Edge Rules report. |
 | `nrz functions runtime install/status/path` | Управляет локальным cache точного STABLE runtime. | Обычные `functions check` и `deploy` устанавливают runtime автоматически; эти команды нужны для диагностики и offline-подготовки. |
 | `nrz functions invoke <NAME>` | Вызывает активную Function revision. | `--environment` или общий сохранённый context. |
 | `nrz rules pull/publish/status` | Читает или публикует user-authored Edge Rules. | `--environment` или общий сохранённый context. |
+
+Remote KV v2 использует buffered acknowledgement по умолчанию и batching window
+100 ms для новых branches; `--durable` ожидает durable acknowledgement конкретной
+записи, `flush` делает предыдущие buffered writes durable и не удаляет данные.
+Mutations автоматически не повторяются. `OUTCOME_UNKNOWN` означает, что запись могла
+примениться: команда завершается с ошибкой, а решение о повторе принимает caller.
+При ошибке создания Store/branch/fork сообщение сохраняет отправленные UUID; ручной
+повтор использует те же IDs и неизменный запрос. JSON mode выводит один объект в
+stdout, human mode — читаемый JSON в stderr с безопасным отображением терминальных управляющих символов.
 
 ## Найденные устаревшие или мертвые упоминания
 

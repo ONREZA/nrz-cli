@@ -103,7 +103,7 @@ impl ApiClient {
             GetV1kaikiDatabasesByIdConnectionResponse::Ok
         )
     }
-    pub async fn database_branches(&self, id: &str) -> anyhow::Result<Branch200Response> {
+    pub async fn database_branches(&self, id: &str) -> anyhow::Result<Branch200Response2> {
         let response = self
             .platform()?
             .get_v1kaiki_databases_by_id_branches(GetV1kaikiDatabasesByIdBranchesRequest {
@@ -121,8 +121,8 @@ impl ApiClient {
     pub async fn create_database_branch(
         &self,
         id: &str,
-        body: BranchRequestBody,
-    ) -> anyhow::Result<Branch200Response2> {
+        body: BranchRequestBody2,
+    ) -> anyhow::Result<Branch200Response3> {
         let response = self
             .platform()?
             .post_v1kaiki_databases_by_id_branches(PostV1kaikiDatabasesByIdBranchesRequest {

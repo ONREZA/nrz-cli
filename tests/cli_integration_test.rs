@@ -29,6 +29,8 @@ mod functions;
 mod help;
 #[path = "cli_integration/kv.rs"]
 mod kv;
+#[path = "cli_integration/kv_v2.rs"]
+mod kv_v2;
 #[path = "cli_integration/platform.rs"]
 mod platform;
 #[path = "cli_integration/projects.rs"]
