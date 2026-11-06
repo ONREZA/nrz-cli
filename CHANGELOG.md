@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.50.1] - 2026-11-06
+
+### 🐛 Bug Fixes
+
+- **build:** preserve admitted python compiler ([f5da5a9](https://github.com/ONREZA/nrz-cli/commit/f5da5a92fab6654222682995a34642bd2f956187))
+
 ## [0.50.0] - 2026-11-06
 
 ### 🔧 Changed
