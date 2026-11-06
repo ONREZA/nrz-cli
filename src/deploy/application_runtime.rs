@@ -348,10 +348,14 @@ fn resolve_platform_runtime(
     }
     .validate_target(Some(compiler))
     .map_err(anyhow::Error::msg)?;
-    if compiler_family == ApplicationRuntimeFamily::Python {
-        resolved.build_toolchain.python_version =
-            PythonMinor::from_target(compiler).map(PythonMinor::version);
-    }
+    let python_interpreter = if compiler_family == ApplicationRuntimeFamily::Python {
+        let minor = PythonMinor::from_target(compiler)
+            .context("frozen Python compiler target has invalid syntax")?;
+        resolved.build_toolchain.python_version = Some(minor.version());
+        Some(std::path::PathBuf::from(minor.platform_interpreter()))
+    } else {
+        None
+    };
     let application_target = if let Some(declaration) = &resolved.application_runtime {
         declaration
             .intent()
@@ -381,7 +385,7 @@ fn resolve_platform_runtime(
         context: resolved,
         application_target,
         node_version,
-        python_interpreter: None,
+        python_interpreter,
     })
 }
 
@@ -446,7 +450,10 @@ pub(crate) async fn validate_application_runtime_before_build(
                     .as_ref()
                     .is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Python))
     {
-        let interpreter = super::python_toolchain::available_interpreter(environment).await?;
+        let interpreter = match resolved.python_interpreter.as_deref() {
+            Some(path) => super::python_toolchain::probe_interpreter(path).await?,
+            None => super::python_toolchain::available_interpreter(environment).await?,
+        };
         if !platform_runner
             && context
                 .application_runtime
@@ -455,7 +462,7 @@ pub(crate) async fn validate_application_runtime_before_build(
         {
             resolved.application_target = Some(format!("python-{}", interpreter.version));
         }
-        bind_python_compiler(&mut resolved, interpreter);
+        bind_python_compiler(&mut resolved, interpreter, platform_runner)?;
     }
     let mut measured_bun = None;
     let mut measured_node = None;
@@ -550,11 +557,21 @@ pub(crate) async fn validate_application_runtime_before_build(
 fn bind_python_compiler(
     resolved: &mut ResolvedBuildRuntime,
     interpreter: super::python_toolchain::PythonInterpreter,
-) {
+    platform_runner: bool,
+) -> anyhow::Result<()> {
     if resolved.context.build_toolchain.family == nrz_source_bundle::BuildToolchainFamily::Python {
+        if platform_runner
+            && resolved.context.build_toolchain.resolved_python_minor() != Some(interpreter.minor)
+        {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                "observed Python compiler differs from the admitted compiler target",
+            ));
+        }
         resolved.context.build_toolchain.python_version = Some(interpreter.minor.version());
     }
     resolved.python_interpreter = Some(interpreter.path);
+    Ok(())
 }
 
 pub(crate) async fn measured_bun_target(

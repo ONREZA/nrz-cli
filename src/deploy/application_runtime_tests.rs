@@ -63,6 +63,66 @@ fn admitted_targets_replace_requested_lines_without_mutating_source_intent() {
 }
 
 #[test]
+fn platform_python_compiler_path_comes_from_the_admitted_target() {
+    let mut original = context("PYTHON", "PYTHON");
+    original.build_toolchain.python_version = Some(PythonMinor::Python312.version());
+    original
+        .application_runtime
+        .as_mut()
+        .unwrap()
+        .python_version = Some(PythonMinor::Python312.version());
+    for minor in [PythonMinor::Python312, PythonMinor::Python313] {
+        let resolved = resolve_platform_runtime(
+            &original,
+            &format!("python-{}", minor.version()),
+            "python-3.12",
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.python_interpreter,
+            Some(std::path::PathBuf::from(minor.platform_interpreter())),
+            "platform compiler must pin its admitted interpreter rather than use ambient builder PATH"
+        );
+        assert_eq!(
+            resolved.context.build_toolchain.python_version,
+            Some(minor.version())
+        );
+        assert_eq!(resolved.application_target.as_deref(), Some("python-3.12"));
+    }
+    assert_eq!(
+        original.build_toolchain.python_version,
+        Some(PythonMinor::Python312.version())
+    );
+}
+
+#[test]
+fn platform_python_compiler_mismatch_cannot_rewrite_the_admitted_context() {
+    let mut original = context("PYTHON", "PYTHON");
+    original.build_toolchain.python_version = Some(PythonMinor::Python312.version());
+    original
+        .application_runtime
+        .as_mut()
+        .unwrap()
+        .python_version = Some(PythonMinor::Python312.version());
+    let mut resolved =
+        resolve_platform_runtime(&original, "python-3.12", "python-3.12", None).unwrap();
+    let selected = resolved.python_interpreter.clone();
+    let different = crate::deploy::python_toolchain::PythonInterpreter {
+        path: "/ambient/python3".into(),
+        minor: PythonMinor::Python314,
+        version: "3.14.9".into(),
+    };
+    assert!(bind_python_compiler(&mut resolved, different, true).is_err());
+    assert_eq!(
+        resolved.context, original,
+        "ambient builder Python 3.14 must not replace admitted 3.12"
+    );
+    assert_eq!(resolved.python_interpreter, selected);
+    assert_eq!(resolved.application_target.as_deref(), Some("python-3.12"));
+}
+
+#[test]
 fn policy_resolution_keeps_compiler_and_application_families_independent_and_frozen() {
     let original = context("BUN", "NODE");
     let resolved = resolve_platform_runtime(&original, "bun-1.4.3", "node-26", Some("24")).unwrap();
@@ -439,7 +499,9 @@ fn local_python_context_records_actual_compiler_independently_of_declared_minors
                 minor: PythonMinor::Python314,
                 version: "3.14.10".into(),
             },
-        );
+            false,
+        )
+        .unwrap();
         assert_eq!(
             resolved.context.build_toolchain.python_version,
             Some(PythonMinor::Python314.version())

@@ -1254,6 +1254,7 @@ fn fresh_hono_dist_handoff_keeps_primary_lineage_through_runtime_relocation() {
 }
 
 #[test]
+#[ignore = "qualifies the real platform CLI against the exact Builder Python rootfs"]
 fn fresh_python_module_handoff_keeps_project_owned_bootstrap_with_dist_output() {
     let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
     let (api_url, _) = spawn_edge_build_handoff_mock_with_commands(
@@ -1331,6 +1332,7 @@ fn fresh_python_module_handoff_keeps_project_owned_bootstrap_with_dist_output() 
 }
 
 #[test]
+#[ignore = "qualifies the real platform CLI against the exact Builder Python rootfs"]
 fn fresh_python_dependencies_use_resolved_minors_without_rejecting_requested_lines() {
     for (fresh_install, fresh_build) in [(true, false), (false, true), (false, false)] {
         let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
