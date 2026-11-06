@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.50.0] - 2026-11-06
+
+### 🔧 Changed
+
+- **emulator:** pin functions bun 1.4.4 ([17926d5](https://github.com/ONREZA/nrz-cli/commit/17926d558eaebe616e6625001aaae1ba2e714b57))
+- **deps:** sync runtime toolchain pins ([458ee3c](https://github.com/ONREZA/nrz-cli/commit/458ee3c1f3231b78bc3a255f52e4e4c7dd119c2a))
+- **deps:** refresh source publisher pins ([8fef5fa](https://github.com/ONREZA/nrz-cli/commit/8fef5faf54ce0adf1bc7516fb33fcadc34a16623))
+
+### ✨ Features
+
+- **kv:** add platform kv v2 commands ([24b544f](https://github.com/ONREZA/nrz-cli/commit/24b544ff15e3398db7e0b107181083e911b8352c))
+
+### 🐛 Bug Fixes
+
+- **deploy:** package standalone tanstack output ([330575c](https://github.com/ONREZA/nrz-cli/commit/330575ce71c6d8ec189ea2f6ed4b93998f3050f7))
+- **deploy:** preserve local build provenance ([4d1a8de](https://github.com/ONREZA/nrz-cli/commit/4d1a8dedd27cb5ac6834d7d59894c7918f8ef5ca))
+- **build:** accept inert arm prebuilds ([eddde8f](https://github.com/ONREZA/nrz-cli/commit/eddde8f1af2cc2181a3d8b4649409b2c7976b18b))
+- **build:** bound native artifact reads ([6690af4](https://github.com/ONREZA/nrz-cli/commit/6690af46079a5e127d0494ccd5dcb405cf4d5a75))
+- **deploy:** publish ia32 addon support ([1bd94f7](https://github.com/ONREZA/nrz-cli/commit/1bd94f7c0286d4345eb7031dff6b5c2b1a826943))
+- **deploy:** allow win32 ia32 addon variants ([aee5a30](https://github.com/ONREZA/nrz-cli/commit/aee5a30d7c360439c768a50c52c1e37b4c628170))
+
 ## [0.49.8] - 2026-10-30
 
 ### 🐛 Bug Fixes
