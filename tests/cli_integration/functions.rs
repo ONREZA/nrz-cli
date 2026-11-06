@@ -15,10 +15,9 @@ fn functions_runtime_status_json_emits_single_object_without_downloading() {
     let lines = stdout.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 1, "expected one JSON object, got: {stdout}");
     let value: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-    assert_eq!(
-        value["runtimeReleaseId"],
-        "runtime-2d20a492936c63b6dd1dd6b23f0e950af7e071e3"
-    );
+    let pinned: serde_json::Value =
+        serde_json::from_str(include_str!("../../assets/functions-runtime.lock.json")).unwrap();
+    assert_eq!(value["runtimeReleaseId"], pinned["runtimeReleaseId"]);
     assert_eq!(value["installed"], false);
     assert!(
         value["target"]
