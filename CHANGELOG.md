@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.50.2] - 2026-11-08
+
+### 🐛 Bug Fixes
+
+- **build:** preserve tools and native errors ([1392082](https://github.com/ONREZA/nrz-cli/commit/13920824e50fbe2edb624c4b9c952b9d44a90e57))
+
 ## [0.50.1] - 2026-11-06
 
 ### 🐛 Bug Fixes
