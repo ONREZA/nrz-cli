@@ -722,7 +722,12 @@ pub(super) fn resolve_install_command(
         Some(info) => {
             Some(crate::detect::package_manager::install_command(info.pm_type).to_string())
         }
-        None => Some("npm install".to_string()),
+        None => Some(
+            crate::detect::package_manager::install_command(
+                crate::detect::types::PackageManagerType::Npm,
+            )
+            .to_string(),
+        ),
     }
 }
 

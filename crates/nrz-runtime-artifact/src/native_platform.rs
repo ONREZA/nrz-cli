@@ -47,7 +47,15 @@ pub fn verify_linux_x86_64_native_platform<R: Read>(
                     header::ET_REL | header::ET_EXEC | header::ET_DYN
                 )
             {
-                return invariant("native platform requires Linux x86_64 little-endian ELF");
+                return invariant(format!(
+                    "native platform requires Linux x86_64 little-endian ELF \
+                     (class={}, data={}, machine={}, osabi={}, type={})",
+                    elf.e_ident[header::EI_CLASS],
+                    elf.e_ident[header::EI_DATA],
+                    elf.e_machine,
+                    elf.e_ident[header::EI_OSABI],
+                    elf.e_type,
+                ));
             }
         }
         NativeHeader::Foreign => {

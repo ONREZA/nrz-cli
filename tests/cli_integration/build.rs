@@ -15,6 +15,91 @@ fn build_json(temp: &tempfile::TempDir) -> serde_json::Value {
 }
 
 #[test]
+fn npm_build_preset_installs_tools_without_changing_production_env_or_authored_commands() {
+    for authored_install in [None, Some("npm install --omit=dev")] {
+        let temp = tempfile::tempdir().unwrap();
+        let tool = temp.path().join("build-tool");
+        let app = temp.path().join("app");
+        fs::create_dir_all(&tool).unwrap();
+        fs::create_dir_all(&app).unwrap();
+        fs::write(
+            tool.join("package.json"),
+            r#"{"name":"vite","version":"0.0.0-fixture","bin":{"vite":"cli.js"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            tool.join("cli.js"),
+            "#!/usr/bin/env node\nconst fs = require('node:fs');\nif (process.env.NODE_ENV !== 'production') throw new Error('runtime environment changed');\nfs.mkdirSync('dist', {recursive: true});\nfs.writeFileSync('dist/index.html', '<h1>built with development tools</h1>');\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("package.json"),
+            json!({
+                "name": "npm-build-preset-fixture",
+                "version": "1.0.0",
+                "private": true,
+                "scripts": {"build": "vite build"},
+                "devDependencies": {"vite": format!("file:{}", tool.display())}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let install = authored_install
+            .map(|command| format!("install_command='{command}'\n"))
+            .unwrap_or_default();
+        fs::write(
+            app.join("onreza.toml"),
+            format!("[project]\nframework='vite'\n[build]\noutput_directory='dist'\n{install}"),
+        )
+        .unwrap();
+        let user_config = temp.path().join("user-npmrc");
+        let global_config = temp.path().join("global-npmrc");
+        fs::write(&user_config, "").unwrap();
+        fs::write(&global_config, "").unwrap();
+        let mut command = nrz();
+        for (key, _) in std::env::vars_os() {
+            let name = key.to_string_lossy();
+            if name.to_ascii_lowercase().starts_with("npm_config_") || name.starts_with("NRZ_") {
+                command.env_remove(key);
+            }
+        }
+        let output = command
+            .current_dir(&app)
+            .timeout(std::time::Duration::from_secs(30))
+            .env("NODE_ENV", "production")
+            .env("npm_config_offline", "true")
+            .env("npm_config_ignore_scripts", "true")
+            .env("npm_config_audit", "false")
+            .env("npm_config_fund", "false")
+            .env("npm_config_package_lock", "false")
+            .env("npm_config_cache", temp.path().join("npm-cache"))
+            .env("npm_config_userconfig", &user_config)
+            .env("npm_config_globalconfig", &global_config)
+            .env("NRZ_API_URL", "http://127.0.0.1:9")
+            .args(["--token", "test-token", "deploy", "--dry", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            authored_install.is_none(),
+            "install={authored_install:?}\nstdout:{}\nstderr:{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if authored_install.is_none() {
+            assert!(app.join("dist/index.html").is_file());
+            assert_eq!(stdout_json(&output)["compute"], "STATIC");
+        } else {
+            assert!(!app.join("dist/index.html").exists());
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("Installing dependencies: npm install --omit=dev")
+            );
+        }
+    }
+}
+
+#[test]
 fn deploy_app_in_non_monorepo_fails() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

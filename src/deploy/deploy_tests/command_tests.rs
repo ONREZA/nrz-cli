@@ -763,7 +763,7 @@ fn declared_python_defaults_ignore_javascript_build_tooling() {
     let node_effective = effective_config(dir.path(), node_config.clone());
     assert_eq!(
         resolve_install_command(dir.path(), &node_effective).as_deref(),
-        Some("npm install")
+        Some("npm install --include=dev")
     );
     assert_eq!(
         resolve_build_command(None, dir.path(), &node_effective).as_deref(),

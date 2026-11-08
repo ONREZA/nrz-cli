@@ -66,6 +66,21 @@ fn linux_native_platform_rejects_foreign_and_malformed_elf_headers() {
 }
 
 #[test]
+fn native_platform_rejection_keeps_invariant_class_and_bounded_elf_details() {
+    let mut bytes = elf_header(header::ET_DYN);
+    bytes[18..20].copy_from_slice(&header::EM_AARCH64.to_le_bytes());
+    bytes.extend_from_slice(b"private payload must not appear in diagnostics");
+    let mut reader = Cursor::new(bytes);
+    let error = verify_linux_x86_64_native_platform(&mut reader).unwrap_err();
+    assert!(matches!(error, crate::RuntimeArtifactError::Invariant(_)));
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("native platform requires Linux x86_64 little-endian ELF"));
+    assert!(diagnostic.contains("class=2, data=1, machine=183, osabi=0, type=3"));
+    assert!(!diagnostic.contains("private payload"));
+    assert_eq!(reader.position(), 64);
+}
+
+#[test]
 fn linux_native_platform_requires_pe_and_fat_header_witnesses() {
     // A real Python identifier and Java bytecode are not foreign native formats.
     for bytes in [

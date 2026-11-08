@@ -97,6 +97,15 @@ pub enum RuntimeVerificationError {
     Dependency(#[from] DependencySourceTreeError),
     #[error(transparent)]
     Path(#[from] PathWorkError),
+    // Keep the cause before paths so bounded upstream evidence retains it.
+    #[error("{source}; source file role={role:?}, layer={layer:?}, path={path:?}")]
+    FileContext {
+        path: String,
+        role: FileRole,
+        layer: Option<String>,
+        #[source]
+        source: Box<RuntimeVerificationError>,
+    },
 }
 
 type Result<T> = std::result::Result<T, RuntimeVerificationError>;
@@ -371,11 +380,18 @@ fn verify_managed_payload(
         let path = entry_path(file);
         if matches!(file, FileEntry::File { .. }) {
             if !python && path.ends_with(".node") {
-                verify_node_addon(source, path, context)?;
+                verify_node_addon(source, path, context)
+                    .map_err(|error| file_context(file, error))?;
             }
             if python {
-                let mut reader = source.open_file(path)?;
-                verify_linux_x86_64_native_platform(&mut reader)?;
+                let result = source
+                    .open_file(path)
+                    .map_err(RuntimeVerificationError::from)
+                    .and_then(|mut reader| {
+                        verify_linux_x86_64_native_platform(&mut reader)
+                            .map_err(RuntimeVerificationError::from)
+                    });
+                result.map_err(|error| file_context(file, error))?;
             }
             continue;
         }
@@ -387,7 +403,8 @@ fn verify_managed_payload(
         if let Ok(target) = files.binary_search_by(|entry| entry_path(entry).cmp(&resolved)) {
             work.charge(1)?;
             if !python && (path.ends_with(".node") || resolved.ends_with(".node")) {
-                verify_node_addon(source, &resolved, context)?;
+                verify_node_addon(source, &resolved, context)
+                    .map_err(|error| file_context(&files[target], error))?;
             }
             if checked_paths.insert((target, context)) {
                 pending.push((target, context));
@@ -415,6 +432,15 @@ fn verify_managed_payload(
         }
     }
     Ok(())
+}
+
+fn file_context(file: &FileEntry, source: RuntimeVerificationError) -> RuntimeVerificationError {
+    RuntimeVerificationError::FileContext {
+        path: entry_path(file).to_owned(),
+        role: file_role(file).clone(),
+        layer: file_owner(file).map(str::to_owned),
+        source: Box::new(source),
+    }
 }
 
 fn verify_dependencies(

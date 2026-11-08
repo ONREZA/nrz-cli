@@ -821,6 +821,174 @@ fn embedded_javascript_addons_require_linux_x86_64_elf_even_through_aliases() {
 }
 
 #[test]
+fn native_addon_failure_retains_file_context_through_materialization_diagnostic() {
+    let path = "outputbundle/api/node_modules/pkg/native.node";
+    let mut arm = elf(false, None);
+    arm[18..20].copy_from_slice(&183u16.to_le_bytes());
+    for role in ["compute", "dependency"] {
+        let source = api_addon_source(path, role, &arm);
+        let targets = [LayerBuildTarget {
+            layer_name: "api",
+            build_runtime_target: "node-24",
+        }];
+        let roots = [AdmittedDependencyRoot {
+            layer_name: "api",
+            source_root: "outputbundle/api/node_modules",
+            kind: DependencyMaterializationKind::JavaScriptNodeModules,
+            build_runtime_target: "node-24",
+        }];
+        let error = verify_prepared_source_v2_runtime(
+            &source,
+            &targets,
+            if role == "dependency" { &roots } else { &[] },
+            limits(),
+        )
+        .unwrap_err();
+        assert_native_file_context(
+            &error,
+            path,
+            if role == "dependency" {
+                FileRole::Dependency
+            } else {
+                FileRole::Compute
+            },
+            Some("api"),
+        );
+        let error = crate::source_v2_materialization::SourceV2MaterializationError::from(error)
+            .into_diagnostic();
+        let crate::source_v2_materialization::SourceV2MaterializationDiagnostic::Original(
+            crate::source_v2_materialization::SourceV2MaterializationError::Runtime(original),
+        ) = &error
+        else {
+            panic!("original runtime failure class changed: {error}");
+        };
+        assert_native_file_context(
+            original,
+            path,
+            if role == "dependency" {
+                FileRole::Dependency
+            } else {
+                FileRole::Compute
+            },
+            Some("api"),
+        );
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains("native platform requires Linux x86_64 little-endian ELF"));
+        assert!(diagnostic.contains("class=2, data=1, machine=183, osabi=0, type=3"));
+        assert!(diagnostic.contains(&format!("path={path:?}")));
+        assert!(diagnostic.contains("layer=Some(\"api\")"));
+        assert!(diagnostic.contains(if role == "dependency" {
+            "role=Dependency"
+        } else {
+            "role=Compute"
+        }));
+    }
+}
+
+fn api_addon_source(path: &str, role: &str, payload: &[u8]) -> Fixture {
+    let entry = "outputbundle/api/server.js";
+    let mut api = layer("api", "NODE", "node-24", entry);
+    api["rootPath"] = json!("outputbundle/api");
+    prepare(
+        json!({"schemaVersion":"SOURCE_BUNDLE_V2.0", "capabilities":["COMPUTE_NETWORK_V1"],
+            "files":[file(entry, "compute", Some("api")), file(path, role, Some("api"))],
+            "layers":[api], "routes":[{"pattern":"/", "layerName":"api"}],
+            "entrypoints":[entry]}),
+        &[(path, payload)],
+    )
+}
+
+fn assert_native_file_context(
+    error: &RuntimeVerificationError,
+    path: &str,
+    role: FileRole,
+    layer: Option<&str>,
+) {
+    let RuntimeVerificationError::FileContext {
+        path: actual_path,
+        role: actual_role,
+        layer: actual_layer,
+        source,
+    } = error
+    else {
+        panic!("missing native file context: {error}");
+    };
+    assert_eq!(actual_path, path);
+    assert_eq!(actual_role, &role);
+    assert_eq!(actual_layer.as_deref(), layer);
+    assert!(matches!(
+        source.as_ref(),
+        RuntimeVerificationError::Runtime(RuntimeArtifactError::Invariant(_))
+    ));
+}
+
+#[test]
+fn known_foreign_addon_inside_api_layer_remains_accepted() {
+    let path = "outputbundle/api/node_modules/pkg/prebuilds/linux-arm/binding.node";
+    let source = api_addon_source(
+        path,
+        "compute",
+        include_bytes!("../tests/fixtures/linux-arm.node"),
+    );
+    assert!(
+        verify_prepared_source_v2_runtime(
+            &source,
+            &[LayerBuildTarget {
+                layer_name: "api",
+                build_runtime_target: "node-24",
+            }],
+            &[],
+            limits(),
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn aliased_addon_failure_identifies_the_actual_static_payload() {
+    let mut arm = elf(false, None);
+    arm[18..20].copy_from_slice(&183u16.to_le_bytes());
+    let path = "assets/payload";
+    let source = prepare(
+        manifest(
+            "NODE",
+            "node-24",
+            vec![
+                link(
+                    "node_modules/pkg/native.node",
+                    "../../assets/payload",
+                    "compute",
+                    Some("app"),
+                ),
+                file(path, "static", None),
+            ],
+        ),
+        &[(path, &arm)],
+    );
+    let error =
+        verify_prepared_source_v2_runtime(&source, &target("node-24"), &[], limits()).unwrap_err();
+    assert_native_file_context(&error, path, FileRole::Static, None);
+}
+
+#[test]
+fn python_native_failure_retains_file_context() {
+    let mut arm = elf(false, None);
+    arm[18..20].copy_from_slice(&183u16.to_le_bytes());
+    let path = "site-packages/pkg/native.so";
+    let source = prepare(
+        manifest(
+            "PYTHON",
+            "python-3.13",
+            vec![file(path, "compute", Some("app"))],
+        ),
+        &[(path, &arm)],
+    );
+    let error = verify_prepared_source_v2_runtime(&source, &target("python-3.13"), &[], limits())
+        .unwrap_err();
+    assert_native_file_context(&error, path, FileRole::Compute, Some("app"));
+}
+
+#[test]
 fn embedded_javascript_keeps_plain_and_foreign_non_addon_resources() {
     let source = prepare(
         manifest(

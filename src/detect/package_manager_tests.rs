@@ -261,7 +261,10 @@ fn package_manager_field_takes_priority_over_lockfile() {
 
 #[test]
 fn install_command_variants() {
-    assert_eq!(install_command(PackageManagerType::Npm), "npm install");
+    assert_eq!(
+        install_command(PackageManagerType::Npm),
+        "npm install --include=dev"
+    );
     assert_eq!(install_command(PackageManagerType::Yarn), "yarn install");
     assert_eq!(install_command(PackageManagerType::Pnpm), "pnpm install");
     assert_eq!(install_command(PackageManagerType::Bun), "bun install");

@@ -185,7 +185,8 @@ fn version_major(version: &str) -> Option<u64> {
 /// Get the install command for a package manager type.
 pub fn install_command(pm: PackageManagerType) -> &'static str {
     match pm {
-        PackageManagerType::Npm => "npm install",
+        // Build tools remain necessary when runtime variables select production.
+        PackageManagerType::Npm => "npm install --include=dev",
         PackageManagerType::Yarn => "yarn install",
         PackageManagerType::Pnpm => "pnpm install",
         PackageManagerType::Bun => "bun install",
