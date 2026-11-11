@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, bail};
@@ -504,6 +504,14 @@ fn project_workspace_dependencies(
         return Ok(entries);
     }
 
+    let captured_dependency_roots = entries
+        .iter()
+        .filter(|entry| {
+            scan.file_category(&entry.path) == super::RuntimeArtifactFileCategory::NodeModules
+        })
+        .filter_map(|entry| dependency_root(&entry.path))
+        .collect::<HashSet<_>>();
+
     let mut projected = Vec::with_capacity(entries.len());
     for entry in &entries {
         if projections
@@ -545,8 +553,13 @@ fn project_workspace_dependencies(
                     root: root.clone(),
                 },
                 SourceBundleEntryKind::Symlink { resolved_path, .. } => {
-                    let projected_target =
-                        project_dependency_target(resolved_path, projection, &projections)?;
+                    let projected_target = project_dependency_target(
+                        resolved_path,
+                        projection,
+                        &projections,
+                        &captured_dependency_roots,
+                        scan,
+                    )?;
                     let link_target = relative_symlink_target(&path, &projected_target)?;
                     SourceBundleEntryKind::Symlink {
                         link_target,
@@ -619,6 +632,8 @@ fn project_dependency_target(
     resolved_path: &str,
     current: &WorkspaceDependencyProjection,
     projections: &[WorkspaceDependencyProjection],
+    captured_dependency_roots: &HashSet<String>,
+    scan: &RuntimeArtifactScan,
 ) -> anyhow::Result<String> {
     if path_in_root(resolved_path, &current.workspace_root) {
         return replace_path_root(resolved_path, &current.workspace_root, &current.link_path);
@@ -631,6 +646,12 @@ fn project_dependency_target(
             && path_in_root(resolved_path, &candidate.workspace_root)
     }) {
         return replace_path_root(resolved_path, &target.workspace_root, &target.link_path);
+    }
+    if scan.file_category(resolved_path) == super::RuntimeArtifactFileCategory::NodeModules
+        && dependency_root(resolved_path)
+            .is_some_and(|root| captured_dependency_roots.contains(&root))
+    {
+        return Ok(resolved_path.to_string());
     }
     bail!(
         "SOURCE_BUNDLE_V1 workspace dependency symlink escapes dependency root: {} -> {}",

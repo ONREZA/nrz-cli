@@ -160,6 +160,84 @@ fn producer_audit_scans_workspace_bin_before_package_alias() {
 }
 
 #[cfg(unix)]
+#[tokio::test]
+async fn producer_audit_projects_nested_workspace_package_with_captured_pnpm_hoist() {
+    let (workspace, _, detection) = producer_audit_workspace(false);
+    let app = workspace.path().join("apps/api");
+    let dependency = "node_modules/.pnpm/dep@1.0.0/node_modules/dep";
+    fs::create_dir_all(workspace.path().join(dependency)).unwrap();
+    fs::write(
+        workspace.path().join(dependency).join("index.js"),
+        b"module.exports = 42",
+    )
+    .unwrap();
+    fs::create_dir_all(workspace.path().join("packages/shared/node_modules")).unwrap();
+    std::os::unix::fs::symlink(
+        "../../../node_modules/.pnpm/dep@1.0.0/node_modules/dep",
+        workspace.path().join("packages/shared/node_modules/dep"),
+    )
+    .unwrap();
+    fs::create_dir_all(app.join("node_modules")).unwrap();
+    std::os::unix::fs::symlink("../../../packages/shared", app.join("node_modules/shared"))
+        .unwrap();
+    let artifact = resolve_workspace_runtime(
+        workspace.path(),
+        &app,
+        build_manifest::generate_compute_manifest("src/main.js"),
+        &detection,
+    );
+    let files = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    for packaging in [Embedded, TrustedMaterialization] {
+        let plan = workspace_bundle(&artifact, files.clone(), &detection, packaging);
+        let logical = crate::test_support::validated_source_bundle_manifest(&plan);
+        crate::test_support::verify_source_bundle(&plan, &logical).await;
+        let restored = crate::test_support::unpack_source_bundle(&plan);
+        assert_eq!(
+            fs::read(
+                restored
+                    .path()
+                    .join("apps/api/node_modules/shared/node_modules/dep/index.js")
+            )
+            .unwrap(),
+            b"module.exports = 42"
+        );
+        assert_eq!(
+            fs::read(
+                restored
+                    .path()
+                    .join("node_modules/shared/node_modules/dep/index.js")
+            )
+            .unwrap(),
+            b"module.exports = 42"
+        );
+        if packaging == TrustedMaterialization {
+            let stage = tempdir().unwrap();
+            let trees = nrz_source_bundle::extract_dependency_source_trees(
+                plan.source_path(),
+                &logical,
+                stage.path(),
+            )
+            .unwrap();
+            let mounted = tempdir().unwrap();
+            for tree in trees {
+                let target = mounted.path().join(tree.source_root);
+                fs::create_dir_all(target.parent().unwrap()).unwrap();
+                fs::rename(tree.path, target).unwrap();
+            }
+            assert_eq!(
+                fs::read(
+                    mounted
+                        .path()
+                        .join("apps/api/node_modules/shared/node_modules/dep/index.js")
+                )
+                .unwrap(),
+                b"module.exports = 42"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn producer_audit_projects_dependencies_without_dropping_application_output() {
     let (_workspace, artifact, detection) = producer_audit_workspace(false);

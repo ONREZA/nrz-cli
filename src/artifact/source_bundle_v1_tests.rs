@@ -1079,6 +1079,102 @@ async fn source_bundle_projects_workspace_packages_into_dependency_root() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn workspace_projection_rejects_non_dependency_or_unarchived_sibling_targets() {
+    for kind in [
+        RuntimeArtifactScanRootKind::BuildOutput,
+        RuntimeArtifactScanRootKind::Metadata,
+        RuntimeArtifactScanRootKind::NodeModules,
+    ] {
+        let root = tempdir().unwrap();
+        for path in [
+            "apps/api/node_modules",
+            "apps/api/dist",
+            "packages/shared/node_modules",
+            "hoisted/node_modules/pkg",
+        ] {
+            fs::create_dir_all(root.path().join(path)).unwrap();
+        }
+        fs::write(
+            root.path().join("apps/api/dist/server.js"),
+            b"require('shared')",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("packages/shared/index.js"),
+            b"require('dep')",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("hoisted/node_modules/pkg/index.js"),
+            b"original dependency",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("hoisted/node_modules/marker.js"),
+            b"captured root witness",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            "../../../packages/shared",
+            root.path().join("apps/api/node_modules/shared"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            "../../../hoisted/node_modules/pkg/index.js",
+            root.path().join("packages/shared/node_modules/dep"),
+        )
+        .unwrap();
+        let scan = RuntimeArtifactScan::Selected {
+            roots: vec![
+                RuntimeArtifactScanRoot {
+                    path: "apps/api/dist".into(),
+                    kind: RuntimeArtifactScanRootKind::BuildOutput,
+                },
+                RuntimeArtifactScanRoot {
+                    path: "apps/api/node_modules".into(),
+                    kind: RuntimeArtifactScanRootKind::NodeModules,
+                },
+                RuntimeArtifactScanRoot {
+                    path: "hoisted/node_modules".into(),
+                    kind: RuntimeArtifactScanRootKind::NodeModules,
+                },
+                RuntimeArtifactScanRoot {
+                    path: "hoisted/node_modules/pkg".into(),
+                    kind,
+                },
+            ],
+            symlink_roots: vec!["packages/shared".into()],
+        };
+        let files = scan_dir(root.path())
+            .unwrap()
+            .into_iter()
+            .filter(|file| {
+                kind != RuntimeArtifactScanRootKind::NodeModules
+                    || file.path != "hoisted/node_modules/pkg/index.js"
+            })
+            .collect::<Vec<_>>();
+        let result = build_source_bundle_plan_with_scan(
+            root.path(),
+            &compute_manifest(),
+            &files,
+            &scan,
+            RuntimeDependencyPackaging::TrustedMaterialization,
+            None,
+        );
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains(if kind == RuntimeArtifactScanRootKind::NodeModules {
+                "symlink target is not included in archive"
+            } else {
+                "workspace dependency symlink escapes dependency root"
+            }),
+            "wrong rejection for {kind:?}: {error}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn source_bundle_embeds_canonical_logical_manifest_first() {
     let dir = tempdir().unwrap();
