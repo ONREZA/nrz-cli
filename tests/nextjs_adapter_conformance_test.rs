@@ -318,7 +318,8 @@ import Image from 'next/image'
 export default function Page() {
   return <main>
     home
-    <Image src="/pixel.png" width={1} height={1} alt="pixel" />
+    <Image src="/docs/pixel.png" width={1} height={1} alt="pixel" />
+    <Image src="/docs/api/image?variant=fixture" width={1} height={1} alt="dynamic pixel" />
     <Image src="https://cdn.example.com/tenants/acme/hero.png" width={1} height={1} alt="remote pixel" />
   </main>
 }
@@ -392,6 +393,13 @@ export async function GET() {
   return Response.json({ ok: true })
 }
 "#,
+    );
+    write(
+        &project.path().join("app/api/image/route.js"),
+        &format!(
+            "export function GET() {{ return new Response(new Uint8Array({}), {{ headers: {{ 'content-type': 'image/png', 'cache-control': 'public, max-age=60' }} }}); }}",
+            serde_json::to_string(PNG_1X1).unwrap()
+        ),
     );
     write(
         &project.path().join("middleware.js"),
@@ -503,7 +511,14 @@ export const config = {
     assert!(
         fs::read_to_string(project.path().join(".next/server/app/index.html"))
             .unwrap()
-            .contains("/_onreza/image?url=%2Fpublic%2Fpixel.png")
+            .contains("/_onreza/image?url=%2Fdocs%2Fpixel.png&amp;source=route")
+    );
+    assert!(
+        fs::read_to_string(project.path().join(".next/server/app/index.html"))
+            .unwrap()
+            .contains(
+                "/_onreza/image?url=%2Fdocs%2Fapi%2Fimage%3Fvariant%3Dfixture&amp;source=route"
+            )
     );
     assert!(
         fs::read_to_string(project.path().join(".next/server/app/index.html"))

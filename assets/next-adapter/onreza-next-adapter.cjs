@@ -378,45 +378,15 @@ function buildImageOptimizerHint(config, installedRemoteImageSources) {
   return decision
 }
 
-function imageLoaderSource(config) {
-  const basePath =
-    typeof config.basePath === 'string' && config.basePath !== '/'
-      ? config.basePath
-      : ''
+function imageLoaderSource() {
   return `'use client'
-
-const BASE_PATH = ${JSON.stringify(basePath)}
-
-function normalizeSource(src) {
-  if (typeof src !== 'string') {
-    return ''
-  }
-  if (BASE_PATH && src.startsWith(BASE_PATH + '/')) {
-    return src.slice(BASE_PATH.length)
-  }
-  return src
-}
-
-function sourceBundlePath(src) {
-  const normalized = normalizeSource(src)
-  if (normalized.slice(0, 8).toLowerCase() === 'https://') {
-    return normalized
-  }
-  if (normalized.startsWith('/_static/') || normalized.startsWith('/public/')) {
-    return normalized
-  }
-  if (normalized.startsWith('/_next/static/')) {
-    return '/_static' + BASE_PATH + normalized
-  }
-  if (normalized.startsWith('/')) {
-    return '/public' + normalized
-  }
-  return '/public/' + normalized
-}
 
 export default function onrezaImageLoader({ src, width, quality }) {
   const params = new URLSearchParams()
-  params.set('url', sourceBundlePath(src))
+  params.set('url', src)
+  if (src.slice(0, 8).toLowerCase() !== 'https://') {
+    params.set('source', 'route')
+  }
   params.set('w', String(width))
   params.set('q', String(quality || 75))
   return '/_onreza/image?' + params.toString()
@@ -424,10 +394,10 @@ export default function onrezaImageLoader({ src, width, quality }) {
 `
 }
 
-function writeImageLoader(projectDir, config) {
+function writeImageLoader(projectDir) {
   const loaderPath = path.join(projectDir, ONREZA_IMAGE_LOADER_RELATIVE_PATH)
   fs.mkdirSync(path.dirname(loaderPath), { recursive: true })
-  fs.writeFileSync(loaderPath, imageLoaderSource(config))
+  fs.writeFileSync(loaderPath, imageLoaderSource())
 }
 
 function pathnameMayMatchMiddleware(middleware, pathname) {
@@ -669,7 +639,7 @@ const adapter = {
         projectKey,
         imageDecision.remoteImageSources,
       )
-      writeImageLoader(projectKey, nextConfig)
+      writeImageLoader(projectKey)
       nextConfig.images = {
         ...(nextConfig.images || {}),
         loader: 'custom',

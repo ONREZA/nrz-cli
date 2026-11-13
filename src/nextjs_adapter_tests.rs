@@ -215,6 +215,53 @@ const distDir = path.join(projectDir, '.next');
 }
 
 #[test]
+fn image_loader_preserves_public_routes_and_dynamic_sources() {
+    let script = format!(
+        r#"
+const assert = require('node:assert/strict');
+const adapter = require({adapter_path});
+const loader = new Function(adapter.__test.imageLoaderSource({{}}).replace('export default ', '') + '\nreturn onrezaImageLoader')();
+for (const src of [
+  '/tutors/sydney-vicidomini.jpg',
+  '/docs/tutors/photo.jpg?version=1&size=large',
+  '/docs/_next/static/media/photo.hash.png',
+  '/api/image?slug=a%2Fb',
+  '/public/photo.jpg',
+  '/photos/фото.jpg?lang=ru',
+]) {{
+  const output = new URL(loader({{ src, width: 640, quality: 75 }}), 'https://example.com');
+  assert.equal(output.pathname, '/_onreza/image');
+  assert.equal(output.searchParams.get('source'), 'route');
+  assert.equal(output.searchParams.get('url'), src);
+  assert.equal(output.searchParams.get('w'), '640');
+  assert.equal(output.searchParams.get('q'), '75');
+}}
+const remote = 'https://cdn.example.com/photos/photo.png?v=2';
+const output = new URL(loader({{ src: remote, width: 128 }}), 'https://example.com');
+assert.equal(output.searchParams.get('url'), remote);
+assert.equal(output.searchParams.get('q'), '75');
+assert.equal(output.searchParams.has('source'), false);
+"#,
+        adapter_path = serde_json::to_string(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("assets/next-adapter/onreza-next-adapter.cjs")
+                .display()
+                .to_string()
+        )
+        .unwrap(),
+    );
+    let output = std::process::Command::new("node")
+        .args(["-e", &script])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn adapter_normalizes_remote_patterns_without_widening_next_semantics() {
     let script = format!(
         r#"

@@ -42,6 +42,17 @@ Adapter implementation and conformance fixtures are included in this repository:
 | `app` route handlers | Compute fallback, classified | Classification supported | Same limitation as `pages/api`; edge-runtime handlers are additionally blocked by edge bundle semantics. |
 | Next edge runtime outputs | Compute fallback | Classified | Edge runtime outputs are framework bundles/chunks, not ONREZA Functions v1 source files. |
 
+## Image Sources
+
+Local image URLs preserve their public path, basePath and query and use
+`/_onreza/image?url=...&source=route&w=...&q=...`. They are resolved through the
+same release's application routing, including access rules, middleware, rewrites
+and dynamic sources; they are not rewritten to `public/` artifact filenames.
+ONREZA still performs resize and encoding. Sources that require runtime routing
+incur an internal source request before a cached variant can be reused.
+This loader requires an Edge release supporting `source=route`; deploy Edge
+support before publishing the adapter and rebuilding customer applications.
+
 ## ONREZA Functions Boundary
 
 ONREZA Functions v1 is intentionally a self-contained source contract:
