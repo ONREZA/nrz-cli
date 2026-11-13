@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.50.3] - 2026-11-13
+
+### 🐛 Bug Fixes
+
+- **build:** preserve next image source routes ([e6d4692](https://github.com/ONREZA/nrz-cli/commit/e6d46926feadf89b3f9ec8eed64d5e8d1464847c))
+- **build:** preserve hoisted workspace links ([7ebbbb5](https://github.com/ONREZA/nrz-cli/commit/7ebbbb5c7b712339c17b177d38ac88ecf0b906ec))
+
 ## [0.50.2] - 2026-11-08
 
 ### 🐛 Bug Fixes
