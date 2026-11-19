@@ -4694,6 +4694,7 @@ pub enum GetV1projectsByIdServicesResponse {
     ///default: Unknown response
     Unknown,
 }
+#[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
@@ -4705,10 +4706,10 @@ pub struct ServiceRequestBody {
     pub source_id: uuid::Uuid,
     #[serde(rename = "sourceRef")]
     #[validate(length(min = 1u64, max = 256u64))]
-    pub source_ref: String,
+    pub source_ref: Option<String>,
     #[serde(rename = "rootDirectory")]
     #[validate(length(min = 1u64, max = 1_024u64))]
-    pub root_directory: String,
+    pub root_directory: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1projectsByIdServicesRequestPath {

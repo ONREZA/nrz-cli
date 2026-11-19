@@ -39,6 +39,8 @@ mod projects;
 mod rollback;
 #[path = "cli_integration/rules.rs"]
 mod rules;
+#[path = "cli_integration/services.rs"]
+mod services;
 
 #[cfg(target_os = "linux")]
 #[path = "cli_integration/terminal.rs"]

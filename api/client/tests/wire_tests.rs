@@ -2,6 +2,28 @@ use nrz_api::{ProjectRequestBody2, Token200Response, User200Response};
 use serde_json::json;
 
 #[test]
+fn service_request_omits_unspecified_ref_and_root_without_defaults() {
+    let base = json!({
+        "name": "web",
+        "sourceId": "00000000-0000-0000-0000-000000000003"
+    });
+    for extra in [
+        json!({}),
+        json!({ "sourceRef": "trunk" }),
+        json!({ "rootDirectory": "apps/web" }),
+        json!({ "sourceRef": "trunk", "rootDirectory": "apps/web" }),
+    ] {
+        let mut request = base.clone();
+        request
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let parsed: nrz_api::ServiceRequestBody = serde_json::from_value(request.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), request);
+    }
+}
+
+#[test]
 fn serving_pending_reason_codes_preserve_the_wire_contract() {
     let mut response = json!({
         "generation": "1", "operationId": null, "releaseId": null,

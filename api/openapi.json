@@ -2234,9 +2234,7 @@
                 },
                 "required": [
                   "name",
-                  "sourceId",
-                  "sourceRef",
-                  "rootDirectory"
+                  "sourceId"
                 ],
                 "additionalProperties": false,
                 "$schema": "https://json-schema.org/draft/2020-12/schema"
@@ -2488,9 +2486,7 @@
                 },
                 "required": [
                   "name",
-                  "sourceId",
-                  "sourceRef",
-                  "rootDirectory"
+                  "sourceId"
                 ],
                 "additionalProperties": false,
                 "$schema": "https://json-schema.org/draft/2020-12/schema"

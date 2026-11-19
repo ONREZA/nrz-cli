@@ -151,6 +151,12 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | `nrz workspace ...` | Локальный список/switch сохраненных workspaces. | Не ходит в API. |
 | `nrz upgrade` | Self-update из GitHub releases `onreza/nrz-cli`. | `--force`, `--version`, `--channel stable|beta`. |
 
+В `services create` и `services update` флаги `--source-ref` и `--root-directory`
+необязательны и передаются только при явном указании. На создании сервер выбирает
+действительную default branch Git Source (для CLI Source — `main`) и корень `.`;
+на обновлении пропущенные поля сохраняют текущие значения Service. `--name` и
+`--source-id` обязательны в обоих случаях.
+
 ## DB subcommands
 
 | Команда | Назначение | Опции |

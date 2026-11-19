@@ -22,7 +22,7 @@ pub enum ServicesCommand {
         #[arg(long, requires = "git_url")]
         git_connection_id: Option<uuid::Uuid>,
     },
-    /// Create a Service using an explicit Source and source root
+    /// Create a Service using an explicit Source
     Create(ServiceConfiguration),
     /// Update one Service without changing neighboring Services
     Update {
@@ -52,8 +52,10 @@ pub struct ServiceConfiguration {
     pub name: String,
     #[arg(long)]
     pub source_id: uuid::Uuid,
-    #[arg(long, default_value = "main")]
-    pub source_ref: String,
-    #[arg(long, default_value = ".")]
-    pub root_directory: String,
+    /// Source ref (create: Git default branch; update: keep the current ref)
+    #[arg(long)]
+    pub source_ref: Option<String>,
+    /// Source root (create: repository root; update: keep the current root)
+    #[arg(long)]
+    pub root_directory: Option<String>,
 }

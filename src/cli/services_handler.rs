@@ -74,8 +74,12 @@ async fn configure(
     anyhow::ensure!(
         service_id.is_none_or(|id| id == result.service_id)
             && result.source_id == body.source_id
-            && result.source_ref == body.source_ref
-            && result.root_directory == body.root_directory,
+            && body
+                .source_ref
+                .is_none_or(|value| result.source_ref == value)
+            && body
+                .root_directory
+                .is_none_or(|value| result.root_directory == value),
         "platform returned a different Service or Source configuration"
     );
     Ok(serde_json::to_value(result)?)
