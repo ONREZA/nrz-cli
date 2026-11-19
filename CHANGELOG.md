@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.50.4] - 2026-11-19
+
+### 🐛 Bug Fixes
+
+- **cli:** preserve service source defaults ([de629be](https://github.com/ONREZA/nrz-cli/commit/de629be670de8c58987f0852bdee52343ab67edd))
+
 ## [0.50.3] - 2026-11-13
 
 ### 🐛 Bug Fixes
