@@ -23646,6 +23646,13 @@ impl core::fmt::Display for ProductFork200ResponseResourceState {
         }
     }
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ProductFork200ResponseResourceCleanupEvidenceValue {
+    String(String),
+    Boolean(bool),
+    Null,
+}
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct ProductFork200ResponseResource {
@@ -23682,7 +23689,9 @@ pub struct ProductFork200ResponseResource {
     pub state: ProductFork200ResponseResourceState,
     #[serde(deserialize_with = "Option::deserialize", rename = "cleanupEvidence")]
     #[serialize_always]
-    pub cleanup_evidence: Option<std::collections::HashMap<String, String>>,
+    pub cleanup_evidence: Option<
+        std::collections::HashMap<String, ProductFork200ResponseResourceCleanupEvidenceValue>,
+    >,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -31779,7 +31788,7 @@ pub struct FailBeforeSourceRequestBodyDiagnostic {
     #[validate(length(min = 1u64, max = 4_096u64))]
     pub message: String,
     /// Structured error details. Shape depends on the error code.
-    pub details: Option<std::collections::HashMap<String, Box<T012>>>,
+    pub details: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct FailBeforeSource200Response {

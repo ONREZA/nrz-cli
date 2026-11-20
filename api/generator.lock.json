@@ -2,5 +2,5 @@
   "repository": "https://github.com/eklipse2k8/oas3-gen.git",
   "revision": "d0fcf0949a6c2b736a5a1dded79239411e9e1133",
   "patch": "api/generator/oas3-gen.patch",
-  "patchSha256": "df5b8ae5ac778b116cf99739f89fe881037f90423d61c799795a20fb40a15d50"
+  "patchSha256": "315e9fb9018c63dcaa35a2c8e388f711f8378be24e0022979a4a0fb1ea9a4a22"
 }

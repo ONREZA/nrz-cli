@@ -175,6 +175,41 @@ fn fork_show_preserves_each_service_url_without_output_flags() {
 }
 
 #[test]
+fn fork_show_preserves_cleaned_resource_evidence() {
+    let directory = tempfile::tempdir().unwrap();
+    let response = json!({"operation": {"id": FORK, "workspaceId": PRODUCT, "productId": PRODUCT,
+        "workspaceBindingGeneration": "1", "sourceEnvironmentId": ENVIRONMENT,
+        "targetEnvironmentId": TARGET, "targetWorkspaceEnvironmentId": TARGET,
+        "sourceReleaseId": RELEASE, "sourceServices": [], "sourceBindings": [], "state": "CLEANING",
+        "expiresAt": "2026-11-20T10:00:00Z", "retained": false, "lifecycleGeneration": "3", "serviceGeneration": "2",
+        "failureStage": "CLEANUP", "cleanupReason": "MANUAL", "createdAt": "2026-11-20T08:00:00Z", "deletedAt": null},
+        "services": [], "resources": [{"id": TARGET, "forkId": FORK, "sourceDatabaseEnvironmentId": SOURCE,
+            "databaseId": PREPARATION, "providerDatabaseId": "db-parent", "sourceProviderBranchId": "br-parent",
+            "mode": "fork", "targetDatabaseEnvironmentId": TARGET, "providerBranchId": "br-copy",
+            "providerEndpointId": "ep-copy", "ancestorLsn": "0/215CD38", "state": "CLEANED",
+            "cleanupEvidence": {"providerDeleted": true, "providerBranchId": "br-copy", "residualCost": "Parent data remains billable"}}],
+        "access": "restricted", "externalEffects": "External effects remain possible", "residualCost": "Metering may lag"});
+    let (api, requests) = mock_api(
+        &format!("/v1/product-forks/{PRODUCT}/{FORK}"),
+        response.clone(),
+    );
+    let output = invoke(
+        &api,
+        directory.path(),
+        &["fork", "--product-id", PRODUCT, "show", FORK],
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout_json(&output), response);
+    assert_eq!(
+        requests
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .method,
+        Method::GET
+    );
+}
+
+#[test]
 fn fork_policy_uses_exact_source_and_expected_generation_for_changes() {
     let directory = tempfile::tempdir().unwrap();
     let spec = json!({"expectedGeneration": "17", "parentEnvironmentId": ENVIRONMENT,

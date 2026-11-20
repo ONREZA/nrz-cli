@@ -170,6 +170,53 @@ fn product_fork_service_url_is_required_and_preserves_value_or_null() {
 }
 
 #[test]
+fn product_fork_cleanup_evidence_preserves_its_scalar_union() {
+    let mut resource = json!({
+        "id": "00000000-0000-4000-8000-000000000001",
+        "forkId": "00000000-0000-4000-8000-000000000002",
+        "sourceDatabaseEnvironmentId": "00000000-0000-4000-8000-000000000003",
+        "databaseId": "00000000-0000-4000-8000-000000000004",
+        "providerDatabaseId": "db-parent", "sourceProviderBranchId": "br-parent",
+        "mode": "fork", "targetDatabaseEnvironmentId": null,
+        "providerBranchId": "br-copy", "providerEndpointId": null,
+        "ancestorLsn": null, "state": "CLEANED", "cleanupEvidence": null
+    });
+    for evidence in [
+        json!(null),
+        json!({}),
+        json!({ "providerDeleted": true, "retained": false, "providerBranchId": "br-copy", "pending": null }),
+    ] {
+        resource["cleanupEvidence"] = evidence;
+        let parsed: nrz_api::ProductFork200ResponseResource =
+            serde_json::from_value(resource.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), resource);
+    }
+    for invalid in [json!(1), json!({}), json!([])] {
+        resource["cleanupEvidence"] = json!({ "providerDeleted": invalid });
+        assert!(
+            serde_json::from_value::<nrz_api::ProductFork200ResponseResource>(resource.clone())
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn fail_before_source_diagnostic_details_preserve_arbitrary_json_values() {
+    let mut nested = json!(null);
+    for _ in 0..16 {
+        nested = json!({ "nested": [nested] });
+    }
+    let diagnostic = json!({
+        "code": "BUILD_FAILED", "message": "build failed",
+        "details": { "null": null, "text": "text", "true": true, "false": false,
+            "integer": 9_007_199_254_740_993_u64, "decimal": 0.5, "array": [null, "text", true, 2], "nested": nested }
+    });
+    let parsed: nrz_api::FailBeforeSourceRequestBodyDiagnostic =
+        serde_json::from_value(diagnostic.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), diagnostic);
+}
+
+#[test]
 fn user_response_nullability_matches_the_server_schema() {
     let valid = json!({
         "id": "00000000-0000-0000-0000-000000000001", "email": "test@example.com",

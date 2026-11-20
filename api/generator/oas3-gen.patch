@@ -3763,7 +3763,7 @@ index 898c29b..ac4996c 100644
 
    Ok(())
 diff --git a/crates/oas3-gen/src/generator/converter/type_resolver.rs b/crates/oas3-gen/src/generator/converter/type_resolver.rs
-index d30ccef..1abf51a 100644
+index d30ccef..84f1be5 100644
 --- a/crates/oas3-gen/src/generator/converter/type_resolver.rs
 +++ b/crates/oas3-gen/src/generator/converter/type_resolver.rs
 @@ -3,7 +3,7 @@ use std::rc::Rc;
@@ -3775,7 +3775,7 @@ index d30ccef..1abf51a 100644
 
  use super::{
    ConversionOutput,
-@@ -119,6 +119,28 @@ impl TypeResolver {
+@@ -119,12 +119,56 @@ impl TypeResolver {
        return self.resolve_ref(ref_path, schema);
      }
 
@@ -3804,7 +3804,35 @@ index d30ccef..1abf51a 100644
      if schema.all_of.len() == 1
        && let Some(type_ref) = self.try_union(&schema.all_of)?
      {
-@@ -483,6 +505,9 @@ impl TypeResolver {
+       return Ok(ConversionOutput::new(type_ref));
+     }
+
++    if schema.properties.is_empty()
++      && let Some(additional) = &schema.additional_properties
++      && let resolved = self.resolve(additional)?
++      && resolved.has_union()
++    {
++      let unconstrained = resolved.any_of.iter().any(|variant| match variant {
++        Schema::Boolean(value) => value.0,
++        _ => self.resolve(variant).is_ok_and(|variant| variant == ObjectSchema::default()),
++      });
++      let mut value = if unconstrained {
++        ConversionOutput::new(TypeRef::new(RustPrimitive::Value))
++      } else {
++        self.resolve_property(parent_name, &format!("{property_name}Value"), &resolved, additional)?
++      };
++      value.result = TypeRef::new(format!(
++        "{}<String, {}>",
++        self.context.config().map_type_path(),
++        value.result.to_rust_type()
++      ));
++      return Ok(value);
++    }
++
+     if schema.is_inline_object() {
+       return self
+         .inline_resolver
+@@ -483,6 +527,9 @@ impl TypeResolver {
        }
        SchemaType::Null => Ok(TypeRef::new(RustPrimitive::Unit).with_option()),
        SchemaType::Array => {
@@ -3814,7 +3842,7 @@ index d30ccef..1abf51a 100644
          let item = self.array_item_type(schema)?;
          let unique = self.preserve_unique_items(schema);
          Ok(TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique))
-@@ -490,6 +515,32 @@ impl TypeResolver {
+@@ -490,6 +537,32 @@ impl TypeResolver {
      }
    }
 
