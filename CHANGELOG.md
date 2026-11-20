@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.52.0] - 2026-11-20
+
+### 🐛 Bug Fixes
+
+- **cli:** scope env commands to a service ([99ab19e](https://github.com/ONREZA/nrz-cli/commit/99ab19e9aa4a6e39532f892a217d42f7cec01ae4))
+
 ## [0.51.2] - 2026-11-20
 
 ### 🐛 Bug Fixes

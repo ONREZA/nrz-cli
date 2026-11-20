@@ -1,6 +1,6 @@
 {
   "name": "@onreza/nrz",
-  "version": "0.51.2",
+  "version": "0.52.0",
   "private": false,
   "description": "ONREZA platform CLI",
   "files": [
