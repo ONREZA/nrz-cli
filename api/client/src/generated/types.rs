@@ -23600,6 +23600,9 @@ pub struct ProductFork200ResponseService {
     #[serde(deserialize_with = "Option::deserialize", rename = "targetCommitSha")]
     #[serialize_always]
     pub target_commit_sha: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub url: Option<String>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]

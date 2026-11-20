@@ -8347,6 +8347,17 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "url": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uri"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -8356,7 +8367,8 @@
                           "gitCommitSha",
                           "targetDeploymentId",
                           "targetDeploymentStatus",
-                          "targetCommitSha"
+                          "targetCommitSha",
+                          "url"
                         ]
                       }
                     },
@@ -8954,6 +8966,17 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "url": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uri"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -8963,7 +8986,8 @@
                           "gitCommitSha",
                           "targetDeploymentId",
                           "targetDeploymentStatus",
-                          "targetCommitSha"
+                          "targetCommitSha",
+                          "url"
                         ]
                       }
                     },
@@ -9579,6 +9603,17 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "url": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uri"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -9588,7 +9623,8 @@
                           "gitCommitSha",
                           "targetDeploymentId",
                           "targetDeploymentStatus",
-                          "targetCommitSha"
+                          "targetCommitSha",
+                          "url"
                         ]
                       }
                     },
@@ -10184,6 +10220,17 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "url": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uri"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -10193,7 +10240,8 @@
                           "gitCommitSha",
                           "targetDeploymentId",
                           "targetDeploymentStatus",
-                          "targetCommitSha"
+                          "targetCommitSha",
+                          "url"
                         ]
                       }
                     },
@@ -10864,6 +10912,17 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "url": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uri"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -10873,7 +10932,8 @@
                           "gitCommitSha",
                           "targetDeploymentId",
                           "targetDeploymentStatus",
-                          "targetCommitSha"
+                          "targetCommitSha",
+                          "url"
                         ]
                       }
                     },

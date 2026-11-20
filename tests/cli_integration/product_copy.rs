@@ -126,6 +126,55 @@ fn fork_plan_and_usage_preserve_explicit_parent_and_precise_costs() {
 }
 
 #[test]
+fn fork_show_preserves_each_service_url_without_output_flags() {
+    let directory = tempfile::tempdir().unwrap();
+    let expires_at = "2026-11-20T00:00:00Z";
+    let response = json!({"operation": {"id": FORK, "workspaceId": PRODUCT, "productId": PRODUCT,
+        "workspaceBindingGeneration": "1", "sourceEnvironmentId": ENVIRONMENT,
+        "targetEnvironmentId": TARGET, "targetWorkspaceEnvironmentId": TARGET,
+        "sourceReleaseId": RELEASE, "sourceServices": [], "sourceBindings": [], "state": "READY",
+        "expiresAt": expires_at, "retained": false, "lifecycleGeneration": "1", "serviceGeneration": "1",
+        "failureStage": null, "cleanupReason": null, "createdAt": "2026-11-19T00:00:00Z", "deletedAt": null},
+        "services": [
+            {"operationId": FORK, "serviceId": SERVICE, "sourceDeploymentId": RELEASE,
+             "gitCommitSha": null, "targetDeploymentId": RELEASE, "targetDeploymentStatus": "ACTIVE",
+             "targetCommitSha": null, "url": "https://web-fork.preview.onreza.ru"},
+            {"operationId": FORK, "serviceId": SOURCE, "sourceDeploymentId": RELEASE,
+             "gitCommitSha": null, "targetDeploymentId": RELEASE, "targetDeploymentStatus": "ACTIVE",
+             "targetCommitSha": null, "url": "https://api-fork.preview.onreza.ru"},
+            {"operationId": FORK, "serviceId": PREPARATION, "sourceDeploymentId": RELEASE,
+             "gitCommitSha": null, "targetDeploymentId": null, "targetDeploymentStatus": null,
+             "targetCommitSha": null, "url": null}],
+        "resources": [], "access": "restricted", "externalEffects": "External effects remain possible",
+        "residualCost": "Metered until cleanup completes"});
+
+    let (api, requests) = mock_api(
+        &format!("/v1/product-forks/{PRODUCT}/{FORK}"),
+        response.clone(),
+    );
+    let output = nrz()
+        .current_dir(directory.path())
+        .env("NRZ_API_URL", api)
+        .env_remove("NRZ_JSON")
+        .args([
+            "--token",
+            "test-token",
+            "fork",
+            "--product-id",
+            PRODUCT,
+            "show",
+            FORK,
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stdout_json(&output), response);
+    let request = requests.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(request.method, Method::GET);
+    assert_eq!(request.body, Value::Null);
+}
+
+#[test]
 fn fork_policy_uses_exact_source_and_expected_generation_for_changes() {
     let directory = tempfile::tempdir().unwrap();
     let spec = json!({"expectedGeneration": "17", "parentEnvironmentId": ENVIRONMENT,

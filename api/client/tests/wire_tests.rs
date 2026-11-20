@@ -150,6 +150,26 @@ fn token_defaults_do_not_hide_missing_required_fields() {
 }
 
 #[test]
+fn product_fork_service_url_is_required_and_preserves_value_or_null() {
+    let mut response = json!({
+        "operationId": "00000000-0000-4000-8000-000000000001",
+        "serviceId": "00000000-0000-4000-8000-000000000002",
+        "sourceDeploymentId": "00000000-0000-4000-8000-000000000003",
+        "gitCommitSha": null, "targetDeploymentId": null,
+        "targetDeploymentStatus": null, "targetCommitSha": null
+    });
+    assert!(
+        serde_json::from_value::<nrz_api::ProductFork200ResponseService>(response.clone()).is_err()
+    );
+    for url in [json!("https://web-fork.preview.onreza.ru"), json!(null)] {
+        response["url"] = url;
+        let service: nrz_api::ProductFork200ResponseService =
+            serde_json::from_value(response.clone()).unwrap();
+        assert_eq!(serde_json::to_value(service).unwrap(), response);
+    }
+}
+
+#[test]
 fn user_response_nullability_matches_the_server_schema() {
     let valid = json!({
         "id": "00000000-0000-0000-0000-000000000001", "email": "test@example.com",
