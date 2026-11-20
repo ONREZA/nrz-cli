@@ -12,8 +12,8 @@ description: Use when users manage ONREZA environment variables, managed Postgre
 
 ## Environment variables
 ```bash
-# select one exact Environment for this checkout
-nrz context use <environment>
+# select the Service and Environment for this checkout
+nrz context use <environment> --service <service_uuid>
 
 # inspect metadata (secret plaintext is never returned)
 nrz env list --environment <environment> --project-id <project_id>
@@ -21,6 +21,8 @@ nrz env list --environment <environment> --project-id <project_id>
 # write one plain or secret value
 nrz env set PUBLIC_URL --value https://example.com --plain --environment <environment> --project-id <project_id>
 printf %s "$API_TOKEN" | nrz env set API_TOKEN --stdin --secret --environment <environment> --project-id <project_id>
+# remove the override in this Environment, or remove the Service default
+nrz env delete OLD_KEY --environment <environment> --yes --project-id <project_id>
 nrz env delete OLD_KEY --all --yes --project-id <project_id>
 
 # validate or execute with an ephemeral materialized snapshot

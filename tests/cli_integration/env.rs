@@ -2,12 +2,28 @@ use super::*;
 use axum::{
     Json, Router,
     extract::Path,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use serde_json::Value;
 
 const PROJECT_ID: &str = "00000000-0000-0000-0000-000000000001";
 const ENVIRONMENT_ID: &str = "00000000-0000-0000-0000-000000000002";
+
+const SERVICE_ID: &str = "00000000-0000-0000-0000-000000000006";
+const WORKSPACE_ID: &str = "00000000-0000-0000-0000-000000000004";
+const SOURCE_ID: &str = "00000000-0000-0000-0000-000000000007";
+const CONFIG_PATH: &str = "/v1/projects/{id}/services/{service}/config";
+
+fn config_context(environment: Option<&str>) -> Value {
+    json!({
+        "workspaceId": WORKSPACE_ID, "productId": PROJECT_ID, "serviceId": SERVICE_ID,
+        "sourceId": SOURCE_ID, "workspaceBindingGeneration":"1",
+        "environment": environment.map(|id| json!({
+            "workspaceId": WORKSPACE_ID, "productId": PROJECT_ID, "productEnvironmentId": id,
+            "workspaceEnvironmentId":"00000000-0000-0000-0000-000000000005", "workspaceBindingGeneration":"1"
+        }))
+    })
+}
 
 fn env_command(
     api: &str,
@@ -27,48 +43,47 @@ fn env_command(
             "env",
             "--project-id",
             PROJECT_ID,
+            "--service",
+            SERVICE_ID,
         ])
         .args(args);
     command
 }
 
 #[test]
-fn env_list_preserves_json_fields_and_masks_secrets_in_human_output() {
+fn env_list_reports_service_defaults_and_masks_secrets_in_both_output_modes() {
     for empty in [false, true] {
-        let variables = if empty {
-            vec![]
-        } else {
-            vec![
-                json!({"id":"00000000-0000-0000-0000-000000000003", "key":"PUBLIC", "value":"literal value", "isSecret":false, "note":"metadata",
-                "scopeType":"ALL", "previewBranch":null, "environments":[],
-                "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:01:00Z"}),
-                json!({"id":"00000000-0000-0000-0000-000000000004", "key":"PRIVATE", "value":"DO_NOT_PRINT_SECRET", "isSecret":true, "note":null,
-                "scopeType":"SELECTED", "previewBranch":"main",
-                "environments":[{"id":ENVIRONMENT_ID, "name":"Production", "type":"PRODUCTION"}],
-                "createdAt":"2026-10-08T12:02:00Z", "updatedAt":"2026-10-08T12:03:00Z"}),
-            ]
-        };
-        let response = json!({"envVars":variables, "total":if empty {0} else {42}});
-        let mut expected = response.clone();
+        let mut effective = Vec::new();
         if !empty {
-            for variable in expected["envVars"].as_array_mut().unwrap() {
-                variable.as_object_mut().unwrap().remove("id");
+            for (key, value, is_secret, id) in [
+                (
+                    "PUBLIC",
+                    "literal value",
+                    false,
+                    "00000000-0000-0000-0000-000000000003",
+                ),
+                (
+                    "PRIVATE",
+                    "DO_NOT_PRINT_SECRET",
+                    true,
+                    "00000000-0000-0000-0000-000000000004",
+                ),
+            ] {
+                effective.push(json!({
+                    "id":id, "key":key, "value":value, "isSecret":is_secret, "note":"metadata",
+                    "environmentId":null, "workspaceEnvVarId":null, "scopeType":"ALL",
+                    "environmentIds":[], "environmentTypes":[], "previewBranch":null,
+                    "updatedAt":"2026-10-08T12:01:00Z", "inherited":false
+                }));
             }
-            expected["envVars"][1]["environments"][0]
-                .as_object_mut()
-                .unwrap()
-                .remove("type");
         }
-        let app = Router::new().route(
-            "/v1/projects/{id}/env",
-            get(move |Path(id): Path<String>| {
-                let response = response.clone();
-                async move {
-                    assert_eq!(id, PROJECT_ID);
-                    Json(response)
-                }
-            }),
-        );
+        let app = Router::new().route(CONFIG_PATH, get(move |Path((product, service)):Path<(String, String)>| {
+            let effective = effective.clone();
+            async move {
+                assert_eq!((product.as_str(), service.as_str()), (PROJECT_ID, SERVICE_ID));
+                Json(json!({"context":config_context(None),"variables":effective,"effective":effective}))
+            }
+        }));
         let api = support::api_mock::spawn(app);
         let root = tempfile::tempdir().unwrap();
         for mode in ["--json", "--human"] {
@@ -76,26 +91,37 @@ fn env_list_preserves_json_fields_and_masks_secrets_in_human_output() {
                 .output()
                 .unwrap();
             assert!(output.status.success(), "{output:?}");
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("DO_NOT_PRINT_SECRET"));
+            assert!(!String::from_utf8_lossy(&output.stderr).contains("DO_NOT_PRINT_SECRET"));
             if mode == "--json" {
-                assert_eq!(stdout_json(&output), expected);
+                let reply = stdout_json(&output);
+                assert_eq!(reply["total"], if empty { 0 } else { 2 });
+                assert_eq!(reply["serviceId"], SERVICE_ID);
+                assert!(reply["environmentId"].is_null());
+                assert_eq!(
+                    reply["envVars"].as_array().unwrap().len(),
+                    if empty { 0 } else { 2 }
+                );
+                if !empty {
+                    let public = &reply["envVars"][0];
+                    assert_eq!(public["key"], "PUBLIC");
+                    assert_eq!(public["value"], "literal value");
+                    assert_eq!(public["note"], "metadata");
+                    assert_eq!(public["scopeType"], "ALL");
+                    assert_eq!(reply["envVars"][1]["key"], "PRIVATE");
+                    assert_eq!(reply["envVars"][1]["isSecret"], true);
+                    assert!(reply["envVars"][1]["value"].is_null());
+                }
                 assert!(output.stderr.is_empty());
             } else {
                 assert!(output.stdout.is_empty());
                 let text = String::from_utf8(output.stderr).unwrap();
                 if empty {
-                    assert_eq!(text, "  No environment variables found.\n");
+                    assert!(text.contains("No environment variables"));
                 } else {
-                    for value in [
-                        "PUBLIC",
-                        "literal value",
-                        "ALL",
-                        "PRIVATE",
-                        "*****",
-                        "Production",
-                    ] {
+                    for value in ["PUBLIC", "literal value", "PRIVATE", "*****"] {
                         assert!(text.contains(value), "missing {value}: {text}");
                     }
-                    assert!(!text.contains("DO_NOT_PRINT_SECRET"), "{text}");
                 }
             }
         }
@@ -103,81 +129,51 @@ fn env_list_preserves_json_fields_and_masks_secrets_in_human_output() {
 }
 
 #[test]
-fn env_set_and_delete_send_confirmed_requests_and_report_results() {
-    let set_response = json!({"id":ENVIRONMENT_ID, "key":"PUBLIC", "scopeType":"ALL",
-        "isSecret":false, "created":true, "message":"Created"});
-    let response = set_response.clone();
+fn env_set_and_delete_address_the_default_of_one_service() {
     let app = Router::new()
-        .route(
-            "/v1/projects/{id}/env",
-            post(move |Path(id): Path<String>, Json(body): Json<Value>| {
-                let response = response.clone();
-                async move {
-                    assert_eq!(id, PROJECT_ID);
-                    assert_eq!(
-                        body,
-                        json!({"key":"PUBLIC", "value":"literal value", "isSecret":false,
-                    "note":"metadata", "scopeType":"ALL", "replaceScope":true,
-                    "changeCategory":true, "confirmed":true})
-                    );
-                    Json(response)
-                }
-            }),
-        )
-        .route(
-            "/v1/projects/{id}/env/{key}",
-            delete(
-                |Path((id, key)): Path<(String, String)>,
-                 axum::extract::Query(query): axum::extract::Query<
-                    std::collections::HashMap<String, String>,
-                >| async move {
-                    assert_eq!(id, PROJECT_ID);
-                    assert_eq!(key, "PUBLIC");
-                    assert_eq!(
-                        query,
-                        std::collections::HashMap::from([("confirmed".into(), "true".into())])
-                    );
-                    Json(json!({"key":"PUBLIC", "deleted":true, "message":"Deleted"}))
-                },
-            ),
-        );
+        .route(CONFIG_PATH, put(|Path((product, service)):Path<(String,String)>, Json(body):Json<Value>| async move {
+            assert_eq!((product.as_str(), service.as_str()), (PROJECT_ID, SERVICE_ID));
+            assert_eq!(body,json!({"environmentId":null,"variables":[{"key":"PUBLIC","value":"literal value","isSecret":false,"note":"metadata"}],"replaceScope":true,"changeCategory":true,"confirmed":true}));
+            Json(json!({"context":config_context(None),"message":"Updated"}))
+        }))
+        .route("/v1/projects/{id}/services/{service}/config/{key}",delete(|Path((product, service, key)):Path<(String,String,String)>, Json(body):Json<Value>| async move {
+            assert_eq!((product.as_str(), service.as_str(), key.as_str()), (PROJECT_ID,SERVICE_ID,"PUBLIC"));
+            assert_eq!(body,json!({"environmentId":null,"confirmed":true}));
+            Json(json!({"context":config_context(None),"message":"Deleted"}))
+        }));
     let api = support::api_mock::spawn(app);
     let root = tempfile::tempdir().unwrap();
     for mode in ["--json", "--human"] {
-        for (args, expected, human) in [
-            (
-                vec![
-                    "set",
-                    "PUBLIC",
-                    "--value",
-                    "literal value",
-                    "--plain",
-                    "--note",
-                    "metadata",
-                    "--all",
-                    "--replace-scope",
-                    "--change-category",
-                    "--yes",
-                ],
-                set_response.clone(),
-                "Created PUBLIC",
-            ),
-            (
-                vec!["delete", "PUBLIC", "--all", "--yes"],
-                json!({"key":"PUBLIC", "deleted":true}),
-                "Deleted PUBLIC",
-            ),
+        for args in [
+            &[
+                "set",
+                "PUBLIC",
+                "--value",
+                "literal value",
+                "--plain",
+                "--note",
+                "metadata",
+                "--all",
+                "--replace-scope",
+                "--change-category",
+                "--yes",
+            ][..],
+            &["delete", "PUBLIC", "--all", "--yes"][..],
         ] {
-            let output = env_command(&api, root.path(), mode, &args)
-                .output()
-                .unwrap();
+            let output = env_command(&api, root.path(), mode, args).output().unwrap();
             assert!(output.status.success(), "{output:?}");
             if mode == "--json" {
-                assert_eq!(stdout_json(&output), expected);
+                let reply = stdout_json(&output);
+                assert_eq!(reply["key"], "PUBLIC");
+                assert_eq!(reply["serviceId"], SERVICE_ID);
+                assert!(reply["environmentId"].is_null());
+                if args[0] == "delete" {
+                    assert_eq!(reply["deleted"], true);
+                }
                 assert!(output.stderr.is_empty());
             } else {
                 assert!(output.stdout.is_empty());
-                assert!(String::from_utf8(output.stderr).unwrap().contains(human));
+                assert!(String::from_utf8(output.stderr).unwrap().contains("PUBLIC"));
             }
         }
     }
@@ -206,10 +202,8 @@ fn env_scope_category_changes_and_deletion_require_explicit_confirmation() {
             "{output:?}"
         );
     }
-    for (args, message) in [
-        (vec!["delete", "PUBLIC", "--yes"], "explicit --all"),
-        (vec!["delete", "PUBLIC", "--all"], "confirmation required"),
-    ] {
+    {
+        let args = ["delete", "PUBLIC", "--all"];
         let output = env_command("http://127.0.0.1:1", root.path(), "--json", &args)
             .output()
             .unwrap();
@@ -218,7 +212,7 @@ fn env_scope_category_changes_and_deletion_require_explicit_confirmation() {
             stdout_json(&output)["error"]
                 .as_str()
                 .unwrap()
-                .contains(message),
+                .contains("confirmation required"),
             "{output:?}"
         );
     }
@@ -235,20 +229,22 @@ fn env_scope_change_respects_terminal_confirmation() {
     let requests = Arc::new(AtomicUsize::new(0));
     let sent = requests.clone();
     let app = Router::new().route(
-        "/v1/projects/{id}/env",
-        post(move |Path(id): Path<String>, Json(body): Json<Value>| {
-            let sent = sent.clone();
-            async move {
-                assert_eq!(id, PROJECT_ID);
-                assert_eq!(body["replaceScope"], true);
-                assert_eq!(body["confirmed"], true);
-                sent.fetch_add(1, Ordering::SeqCst);
-                Json(
-                    json!({"id":ENVIRONMENT_ID, "key":"PUBLIC", "scopeType":"ALL",
-                    "isSecret":false, "created":false, "message":"Updated"}),
-                )
-            }
-        }),
+        CONFIG_PATH,
+        put(
+            move |Path((product, service)): Path<(String, String)>, Json(body): Json<Value>| {
+                let sent = sent.clone();
+                async move {
+                    assert_eq!(
+                        (product.as_str(), service.as_str()),
+                        (PROJECT_ID, SERVICE_ID)
+                    );
+                    assert_eq!(body["replaceScope"], true);
+                    assert_eq!(body["confirmed"], true);
+                    sent.fetch_add(1, Ordering::SeqCst);
+                    Json(json!({"context":config_context(None),"message":"Updated"}))
+                }
+            },
+        ),
     );
     let api = support::api_mock::spawn(app);
     let root = tempfile::tempdir().unwrap();
@@ -265,6 +261,8 @@ fn env_scope_change_respects_terminal_confirmation() {
                 "env",
                 "--project-id",
                 PROJECT_ID,
+                "--service",
+                SERVICE_ID,
                 "set",
                 "PUBLIC",
                 "--value",
@@ -277,14 +275,11 @@ fn env_scope_change_respects_terminal_confirmation() {
         assert_eq!(output.status.success(), accepted, "{output:?}");
         assert!(output.stdout.is_empty());
         let text = String::from_utf8(output.stderr).unwrap();
-        assert!(
-            text.contains("move the one legacy definition to ALL"),
-            "{text}"
-        );
+        assert!(text.contains("PUBLIC"), "{text}");
         assert!(text.contains("[y/N]"), "{text}");
         assert!(
             text.contains(if accepted {
-                "Updated PUBLIC"
+                "PUBLIC"
             } else {
                 "operation cancelled"
             }),
@@ -307,7 +302,7 @@ fn selected_environment_api(variables: Value) -> Router {
             let context = resolved.clone();
             async move {
                 assert_eq!(id,PROJECT_ID);
-                assert_eq!(body,json!({"environment":"Production", "sourceRef":null, "selectionSource":"EXPLICIT"}));
+                assert_eq!(body,json!({"environment":"Production", "serviceId":SERVICE_ID, "sourceRef":null, "selectionSource":"EXPLICIT"}));
                 Json(json!({"protocolVersion":"execution-context-v3", "context":context}))
             }
         }))
@@ -324,24 +319,22 @@ fn selected_environment_api(variables: Value) -> Router {
 
 #[test]
 fn env_stdin_secret_preserves_one_newline_and_resolves_selected_write_scope() {
-    let response = json!({"id":ENVIRONMENT_ID, "key":"PRIVATE", "scopeType":"SELECTED",
-        "isSecret":true, "created":false, "message":"Updated"});
-    let reply = response.clone();
     let app = selected_environment_api(json!({})).route(
-        "/v1/projects/{id}/env",
-        post(move |Path(id): Path<String>, Json(body): Json<Value>| {
-            let response = reply.clone();
-            async move {
-                assert_eq!(id, PROJECT_ID);
+        CONFIG_PATH,
+        put(
+            |Path((product, service)): Path<(String, String)>, Json(body): Json<Value>| async move {
                 assert_eq!(
-                    body,
-                    json!({"key":"PRIVATE", "value":"secret\n", "isSecret":true,
-                "scopeType":"SELECTED", "environmentIds":[ENVIRONMENT_ID],
-                "replaceScope":false, "changeCategory":false, "confirmed":true})
+                    (product.as_str(), service.as_str()),
+                    (PROJECT_ID, SERVICE_ID)
                 );
-                Json(response)
-            }
-        }),
+                assert_eq!(body["environmentId"], ENVIRONMENT_ID);
+                assert_eq!(body["variables"][0]["key"], "PRIVATE");
+                assert_eq!(body["variables"][0]["value"], "secret\n");
+                assert_eq!(body["variables"][0]["isSecret"], true);
+                assert_eq!(body["confirmed"], false);
+                Json(json!({"context":config_context(Some(ENVIRONMENT_ID)),"message":"Updated"}))
+            },
+        ),
     );
     let api = support::api_mock::spawn(app);
     let root = tempfile::tempdir().unwrap();
@@ -364,12 +357,15 @@ fn env_stdin_secret_preserves_one_newline_and_resolves_selected_write_scope() {
         .unwrap();
         assert!(output.status.success(), "{output:?}");
         if mode == "--json" {
-            assert_eq!(stdout_json(&output), response);
+            let reply = stdout_json(&output);
+            assert_eq!(reply["key"], "PRIVATE");
+            assert_eq!(reply["environmentId"], ENVIRONMENT_ID);
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("secret"));
             assert!(output.stderr.is_empty());
         } else {
             assert!(output.stdout.is_empty());
             let text = String::from_utf8(output.stderr).unwrap();
-            assert!(text.contains("Updated PRIVATE"), "{text}");
+            assert!(text.contains("PRIVATE"), "{text}");
             assert!(!text.contains("secret"), "{text}");
         }
     }

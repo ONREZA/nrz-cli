@@ -27,15 +27,20 @@ mod projects;
 mod publication;
 mod releases;
 mod runtime_logs;
+mod service_config;
 mod services;
 
 #[cfg(test)]
 mod client_tests;
 #[cfg(test)]
-mod environment_tests;
-#[cfg(test)]
 mod functions_tests;
+#[cfg(test)]
+mod service_config_tests;
 
 pub use client::ApiClient;
 pub use client::StructuredApiError;
 pub(crate) use client::classify_api_retry;
+
+pub use service_config::{
+    ServiceConfigDeleteBody, ServiceConfigResponse, ServiceConfigSaveBody, ServiceConfigVariable,
+};

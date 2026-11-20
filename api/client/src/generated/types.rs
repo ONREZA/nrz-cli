@@ -18412,113 +18412,122 @@ pub enum GetV1projectsByIdRuntimeLogsResponse {
     Unknown,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
-pub struct GetV1projectsByIdEnvRequestPath {
+pub struct GetV1projectsByIdServicesByServiceIdConfigRequestPath {
     pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
-pub struct GetV1projectsByIdEnvRequestQuery {
-    #[serde(rename = "scopeType")]
-    pub scope_type: Option<Project200Response3EnvVarScopeType>,
-    pub target: Option<DomainResponseItemEnvironmentType>,
-    pub keys: Option<String>,
+pub struct GetV1projectsByIdServicesByServiceIdConfigRequestQuery {
+    #[serde(rename = "environmentId")]
+    pub environment_id: Option<uuid::Uuid>,
+    pub branch: Option<String>,
 }
-/// Returns project environment variables with secret values redacted.
+/// Read Service defaults and Environment overrides
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct GetV1projectsByIdEnvRequest {
-    pub path: GetV1projectsByIdEnvRequestPath,
-    pub query: GetV1projectsByIdEnvRequestQuery,
+pub struct GetV1projectsByIdServicesByServiceIdConfigRequest {
+    pub path: GetV1projectsByIdServicesByServiceIdConfigRequestPath,
+    pub query: GetV1projectsByIdServicesByServiceIdConfigRequestQuery,
 }
-impl GetV1projectsByIdEnvRequest {
+impl GetV1projectsByIdServicesByServiceIdConfigRequest {
     /// Parse the HTTP response into the response enum.
     pub async fn parse_response(
         req: reqwest::Response,
-    ) -> anyhow::Result<GetV1projectsByIdEnvResponse> {
+    ) -> anyhow::Result<GetV1projectsByIdServicesByServiceIdConfigResponse> {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data =
-                oas3_gen_support::Diagnostics::<Env200Response>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::Ok(data));
+                oas3_gen_support::Diagnostics::<Config200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::Ok(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::BadRequest(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::BadRequest(data));
         }
         if status == http::StatusCode::UNAUTHORIZED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::Unauthorized(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::Unauthorized(data));
         }
         if status == http::StatusCode::PAYMENT_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::PaymentRequired(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::PaymentRequired(data));
         }
         if status == http::StatusCode::FORBIDDEN {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::Forbidden(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::Forbidden(data));
         }
         if status == http::StatusCode::NOT_FOUND {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::NotFound(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::NotFound(data));
         }
         if status == http::StatusCode::REQUEST_TIMEOUT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::RequestTimeout(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::RequestTimeout(data));
         }
         if status == http::StatusCode::CONFLICT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::Conflict(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::Conflict(data));
         }
         if status == http::StatusCode::GONE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::Gone(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::Gone(
+                data,
+            ));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::ContentTooLarge(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::ContentTooLarge(data));
         }
         if status == http::StatusCode::UNPROCESSABLE_ENTITY {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::UnprocessableEntity(data));
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdConfigResponse::UnprocessableEntity(data),
+            );
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::UpgradeRequired(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::UpgradeRequired(data));
         }
         if status == http::StatusCode::TOO_MANY_REQUESTS {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::TooManyRequests(data));
+            return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::TooManyRequests(data));
         }
         if status == http::StatusCode::INTERNAL_SERVER_ERROR {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::InternalServerError(data));
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdConfigResponse::InternalServerError(data),
+            );
         }
         if status == http::StatusCode::SERVICE_UNAVAILABLE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
-            return Ok(GetV1projectsByIdEnvResponse::ServiceUnavailable(data));
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdConfigResponse::ServiceUnavailable(data),
+            );
         }
         let _ = req.bytes().await?;
-        return Ok(GetV1projectsByIdEnvResponse::Unknown);
+        return Ok(GetV1projectsByIdServicesByServiceIdConfigResponse::Unknown);
     }
 }
-/// Response types for getV1ProjectsByIdEnv
+/// Response types for getV1ProjectsByIdServicesByServiceIdConfig
 #[derive(Debug, Clone)]
-pub enum GetV1projectsByIdEnvResponse {
+pub enum GetV1projectsByIdServicesByServiceIdConfigResponse {
     ///200: Response for status 200
-    Ok(Env200Response),
+    Ok(Config200Response),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -18554,136 +18563,134 @@ pub enum GetV1projectsByIdEnvResponse {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct EnvRequestBody {
-    #[validate(
-        length(min = 1u64, max = 128u64),
-        regex(path = "REGEX_ATTACHMENT_REQUEST_BODY_ENV_VAR_NAME")
-    )]
-    pub key: String,
-    #[validate(length(max = 4_096u64))]
-    pub value: String,
-    #[serde(rename = "isSecret")]
-    pub is_secret: Option<ProjectRequestBody2IncludeFilesOutsideRoot>,
-    #[validate(length(max = 500u64))]
-    pub note: Option<String>,
-    #[serde(rename = "scopeType")]
-    pub scope_type: Option<Project200Response3EnvVarScopeType>,
-    #[serde(rename = "environmentIds")]
-    pub environment_ids: Option<Vec<uuid::Uuid>>,
-    #[serde(rename = "previewBranch")]
-    pub preview_branch: Option<String>,
-    pub target: Option<Vec<DomainResponseItemEnvironmentType>>,
+pub struct ConfigRequestBody {
+    #[serde(deserialize_with = "Option::deserialize", rename = "environmentId")]
+    #[serialize_always]
+    pub environment_id: Option<uuid::Uuid>,
+    pub branch: Option<String>,
     #[serde(rename = "replaceScope")]
     pub replace_scope: Option<bool>,
     #[serde(rename = "changeCategory")]
     pub change_category: Option<bool>,
     pub confirmed: Option<bool>,
+    #[validate(length(min = 1u64, max = 100u64), nested)]
+    pub variables: Vec<ConfigRequestBodyVariable>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
-pub struct PostV1projectsByIdEnvRequestPath {
+pub struct PutV1projectsByIdServicesByServiceIdConfigRequestPath {
     pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
 }
-/// Creates or updates one project environment variable and returns write-only secret metadata.
+/// Write Service defaults or an exact Environment override
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct PostV1projectsByIdEnvRequest {
-    pub path: PostV1projectsByIdEnvRequestPath,
+pub struct PutV1projectsByIdServicesByServiceIdConfigRequest {
+    pub path: PutV1projectsByIdServicesByServiceIdConfigRequestPath,
     #[validate(nested)]
-    pub body: EnvRequestBody,
+    pub body: ConfigRequestBody,
 }
-impl PostV1projectsByIdEnvRequest {
+impl PutV1projectsByIdServicesByServiceIdConfigRequest {
     /// Parse the HTTP response into the response enum.
     pub async fn parse_response(
         req: reqwest::Response,
-    ) -> anyhow::Result<PostV1projectsByIdEnvResponse> {
+    ) -> anyhow::Result<PutV1projectsByIdServicesByServiceIdConfigResponse> {
         let status = req.status();
         if status == http::StatusCode::OK {
-            let data = oas3_gen_support::Diagnostics::<Env200Response2>::json_with_diagnostics(req)
-                .await?;
-            return Ok(PostV1projectsByIdEnvResponse::Ok(data));
+            let data =
+                oas3_gen_support::Diagnostics::<Config200Response2>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Ok(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::BadRequest(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::BadRequest(data));
         }
         if status == http::StatusCode::UNAUTHORIZED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::Unauthorized(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Unauthorized(data));
         }
         if status == http::StatusCode::PAYMENT_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::PaymentRequired(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::PaymentRequired(data));
         }
         if status == http::StatusCode::FORBIDDEN {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::Forbidden(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Forbidden(data));
         }
         if status == http::StatusCode::NOT_FOUND {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::NotFound(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::NotFound(data));
         }
         if status == http::StatusCode::REQUEST_TIMEOUT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::RequestTimeout(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::RequestTimeout(data));
         }
         if status == http::StatusCode::CONFLICT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::Conflict(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Conflict(data));
         }
         if status == http::StatusCode::GONE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::Gone(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Gone(
+                data,
+            ));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::ContentTooLarge(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::ContentTooLarge(data));
         }
         if status == http::StatusCode::UNPROCESSABLE_ENTITY {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::UnprocessableEntity(data));
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdConfigResponse::UnprocessableEntity(data),
+            );
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::UpgradeRequired(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::UpgradeRequired(data));
         }
         if status == http::StatusCode::TOO_MANY_REQUESTS {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::TooManyRequests(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::TooManyRequests(data));
         }
         if status == http::StatusCode::INTERNAL_SERVER_ERROR {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::InternalServerError(data));
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdConfigResponse::InternalServerError(data),
+            );
         }
         if status == http::StatusCode::SERVICE_UNAVAILABLE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
-            return Ok(PostV1projectsByIdEnvResponse::ServiceUnavailable(data));
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdConfigResponse::ServiceUnavailable(data),
+            );
         }
         let _ = req.bytes().await?;
-        return Ok(PostV1projectsByIdEnvResponse::Unknown);
+        return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Unknown);
     }
 }
-/// Response types for postV1ProjectsByIdEnv
+/// Response types for putV1ProjectsByIdServicesByServiceIdConfig
 #[derive(Debug, Clone)]
-pub enum PostV1projectsByIdEnvResponse {
+pub enum PutV1projectsByIdServicesByServiceIdConfigResponse {
     ///200: Response for status 200
-    Ok(Env200Response2),
+    Ok(Config200Response2),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -18715,153 +18722,173 @@ pub enum PostV1projectsByIdEnvResponse {
     ///default: Unknown response
     Unknown,
 }
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct ConfigRequestBody2 {
+    #[serde(deserialize_with = "Option::deserialize", rename = "environmentId")]
+    #[serialize_always]
+    pub environment_id: Option<uuid::Uuid>,
+    pub branch: Option<String>,
+    #[serde(deserialize_with = "ConfigRequestBody2::deserialize_const_confirmed")]
+    #[serde(serialize_with = "ConfigRequestBody2::serialize_const_confirmed")]
+    #[default(true)]
+    pub confirmed: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl ConfigRequestBody2 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_confirmed<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<bool, D::Error> {
+        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_confirmed<S: serde::Serializer>(
+        value: &bool,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
-pub struct DeleteV1projectsByIdEnvByKeyRequestPath {
+pub struct DeleteV1projectsByIdServicesByServiceIdConfigByKeyRequestPath {
     pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
     #[validate(
         length(min = 1u64, max = 128u64),
         regex(path = "REGEX_ATTACHMENT_REQUEST_BODY_ENV_VAR_NAME")
     )]
     pub key: String,
 }
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
-pub struct DeleteV1projectsByIdEnvByKeyRequestQuery {
-    pub confirmed: Option<String>,
-}
-/// Deletes one project environment variable.
+/// Remove an exact authored target key
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct DeleteV1projectsByIdEnvByKeyRequest {
+pub struct DeleteV1projectsByIdServicesByServiceIdConfigByKeyRequest {
     #[validate(nested)]
-    pub path: DeleteV1projectsByIdEnvByKeyRequestPath,
-    pub query: DeleteV1projectsByIdEnvByKeyRequestQuery,
+    pub path: DeleteV1projectsByIdServicesByServiceIdConfigByKeyRequestPath,
+    pub body: ConfigRequestBody2,
 }
-impl DeleteV1projectsByIdEnvByKeyRequest {
+impl DeleteV1projectsByIdServicesByServiceIdConfigByKeyRequest {
     /// Parse the HTTP response into the response enum.
     pub async fn parse_response(
         req: reqwest::Response,
-    ) -> anyhow::Result<DeleteV1projectsByIdEnvByKeyResponse> {
+    ) -> anyhow::Result<PutV1projectsByIdServicesByServiceIdConfigResponse> {
         let status = req.status();
         if status == http::StatusCode::OK {
-            let data = oas3_gen_support::Diagnostics::<Env200Response3>::json_with_diagnostics(req)
-                .await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::Ok(data));
+            let data =
+                oas3_gen_support::Diagnostics::<Config200Response2>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Ok(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::BadRequest(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::BadRequest(data));
         }
         if status == http::StatusCode::UNAUTHORIZED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::Unauthorized(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Unauthorized(data));
         }
         if status == http::StatusCode::PAYMENT_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::PaymentRequired(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::PaymentRequired(data));
         }
         if status == http::StatusCode::FORBIDDEN {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::Forbidden(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Forbidden(data));
         }
         if status == http::StatusCode::NOT_FOUND {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::NotFound(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::NotFound(data));
         }
         if status == http::StatusCode::REQUEST_TIMEOUT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::RequestTimeout(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::RequestTimeout(data));
         }
         if status == http::StatusCode::CONFLICT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::Conflict(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Conflict(data));
         }
         if status == http::StatusCode::GONE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::Gone(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Gone(
+                data,
+            ));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::ContentTooLarge(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::ContentTooLarge(data));
         }
         if status == http::StatusCode::UNPROCESSABLE_ENTITY {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::UnprocessableEntity(
-                data,
-            ));
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdConfigResponse::UnprocessableEntity(data),
+            );
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::UpgradeRequired(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::UpgradeRequired(data));
         }
         if status == http::StatusCode::TOO_MANY_REQUESTS {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::TooManyRequests(data));
+            return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::TooManyRequests(data));
         }
         if status == http::StatusCode::INTERNAL_SERVER_ERROR {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::InternalServerError(
-                data,
-            ));
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdConfigResponse::InternalServerError(data),
+            );
         }
         if status == http::StatusCode::SERVICE_UNAVAILABLE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdEnvByKeyResponse::ServiceUnavailable(
-                data,
-            ));
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdConfigResponse::ServiceUnavailable(data),
+            );
         }
         let _ = req.bytes().await?;
-        return Ok(DeleteV1projectsByIdEnvByKeyResponse::Unknown);
+        return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Unknown);
     }
-}
-/// Response types for deleteV1ProjectsByIdEnvByKey
-#[derive(Debug, Clone)]
-pub enum DeleteV1projectsByIdEnvByKeyResponse {
-    ///200: Response for status 200
-    Ok(Env200Response3),
-    ///400: Response for status 400
-    BadRequest(ApiError400),
-    ///401: Response for status 401
-    Unauthorized(ApiError401),
-    ///402: Response for status 402
-    PaymentRequired(ApiError402),
-    ///403: Response for status 403
-    Forbidden(ApiError403),
-    ///404: Response for status 404
-    NotFound(ApiError404),
-    ///408: Response for status 408
-    RequestTimeout(ApiError408),
-    ///409: Response for status 409
-    Conflict(ApiError409),
-    ///410: Response for status 410
-    Gone(ApiError410),
-    ///413: Response for status 413
-    ContentTooLarge(ApiError413),
-    ///422: Response for status 422
-    UnprocessableEntity(ApiError422),
-    ///426: Response for status 426
-    UpgradeRequired(ApiError426),
-    ///429: Response for status 429
-    TooManyRequests(ApiError429),
-    ///500: Response for status 500
-    InternalServerError(ApiError500),
-    ///503: Response for status 503
-    ServiceUnavailable(ApiError503),
-    ///default: Unknown response
-    Unknown,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(deny_unknown_fields)]
@@ -32644,24 +32671,61 @@ impl core::fmt::Display for GetV1projectsByIdRuntimeLogsRequestQueryOrder {
         }
     }
 }
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Env200ResponseEnvVarEnvironment {
-    pub id: uuid::Uuid,
-    #[serde(deserialize_with = "Option::deserialize")]
-    #[serialize_always]
-    pub name: Option<String>,
-    #[serde(rename = "type")]
-    pub r#type: DomainResponseItemEnvironmentType,
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Config200ResponseContextEnvironment {
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "productEnvironmentId")]
+    pub product_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceEnvironmentId")]
+    pub workspace_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceBindingGeneration")]
+    #[validate(regex(path = "REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION"))]
+    pub workspace_binding_generation: String,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Env200ResponseEnvVar {
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Config200ResponseContext {
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
+    #[serde(rename = "workspaceBindingGeneration")]
+    #[validate(regex(path = "REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION"))]
+    pub workspace_binding_generation: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    #[validate(nested)]
+    pub environment: Option<Config200ResponseContextEnvironment>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Config200ResponseVariable {
     pub id: uuid::Uuid,
+    #[validate(
+        length(min = 1u64, max = 128u64),
+        regex(path = "REGEX_ATTACHMENT_REQUEST_BODY_ENV_VAR_NAME")
+    )]
     pub key: String,
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
@@ -32671,16 +32735,65 @@ pub struct Env200ResponseEnvVar {
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
     pub note: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "environmentId")]
+    #[serialize_always]
+    pub environment_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "workspaceEnvVarId")]
+    #[serialize_always]
+    pub workspace_env_var_id: Option<uuid::Uuid>,
     #[serde(rename = "scopeType")]
     pub scope_type: Project200Response3EnvVarScopeType,
+    #[serde(rename = "environmentIds")]
+    pub environment_ids: Vec<uuid::Uuid>,
+    #[serde(rename = "environmentTypes")]
+    pub environment_types: Vec<DomainResponseItemEnvironmentType>,
     #[serde(deserialize_with = "Option::deserialize", rename = "previewBranch")]
     #[serialize_always]
     pub preview_branch: Option<String>,
-    pub environments: Vec<Env200ResponseEnvVarEnvironment>,
-    #[serde(rename = "createdAt")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "updatedAt")]
-    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Config200ResponseEffective {
+    pub id: uuid::Uuid,
+    #[validate(
+        length(min = 1u64, max = 128u64),
+        regex(path = "REGEX_ATTACHMENT_REQUEST_BODY_ENV_VAR_NAME")
+    )]
+    pub key: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub value: Option<String>,
+    #[serde(rename = "isSecret")]
+    pub is_secret: bool,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub note: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "environmentId")]
+    #[serialize_always]
+    pub environment_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "workspaceEnvVarId")]
+    #[serialize_always]
+    pub workspace_env_var_id: Option<uuid::Uuid>,
+    #[serde(rename = "scopeType")]
+    pub scope_type: Project200Response3EnvVarScopeType,
+    #[serde(rename = "environmentIds")]
+    pub environment_ids: Vec<uuid::Uuid>,
+    #[serde(rename = "environmentTypes")]
+    pub environment_types: Vec<DomainResponseItemEnvironmentType>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "previewBranch")]
+    #[serialize_always]
+    pub preview_branch: Option<String>,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: String,
+    pub inherited: bool,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -32689,84 +32802,48 @@ pub struct Env200ResponseEnvVar {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct Env200Response {
-    #[serde(rename = "envVars")]
-    pub env_vars: Vec<Env200ResponseEnvVar>,
-    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
-    pub total: i64,
+pub struct Config200Response {
+    #[validate(nested)]
+    pub context: Config200ResponseContext,
+    #[validate(nested)]
+    pub variables: Vec<Config200ResponseVariable>,
+    #[validate(nested)]
+    pub effective: Vec<Config200ResponseEffective>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Env200Response2 {
-    pub id: uuid::Uuid,
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct ConfigRequestBodyVariable {
+    #[validate(
+        length(min = 1u64, max = 128u64),
+        regex(path = "REGEX_ATTACHMENT_REQUEST_BODY_ENV_VAR_NAME")
+    )]
     pub key: String,
-    #[serde(rename = "scopeType")]
-    pub scope_type: Project200Response3EnvVarScopeType,
+    #[validate(length(max = 4_096u64))]
+    pub value: Option<String>,
     #[serde(rename = "isSecret")]
     pub is_secret: bool,
-    pub created: bool,
-    pub message: String,
-    pub warnings: Option<Vec<String>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub note: Option<Option<String>>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Env200Response3 {
-    #[serde(deserialize_with = "Env200Response3::deserialize_const_deleted")]
-    #[serde(serialize_with = "Env200Response3::serialize_const_deleted")]
-    #[default(true)]
-    pub deleted: bool,
-    pub key: String,
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Config200Response2 {
+    #[validate(nested)]
+    pub context: Config200ResponseContext,
     pub message: String,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-impl Env200Response3 {
-    #[allow(
-        clippy::float_cmp,
-        reason = "JSON Schema constants require exact equality"
-    )]
-    fn deserialize_const_deleted<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<bool, D::Error> {
-        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: bool =
-            serde_json::from_str::<bool>("true").map_err(serde::de::Error::custom)?;
-        if value != expected {
-            return Err(serde::de::Error::custom(
-                "value does not match schema const",
-            ));
-        }
-        Ok(value)
-    }
-    #[allow(
-        clippy::ref_option,
-        clippy::trivially_copy_pass_by_ref,
-        reason = "serde field serializers receive a reference"
-    )]
-    #[allow(
-        clippy::float_cmp,
-        reason = "JSON Schema constants require exact equality"
-    )]
-    fn serialize_const_deleted<S: serde::Serializer>(
-        value: &bool,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let expected: bool =
-            serde_json::from_str::<bool>("true").map_err(serde::ser::Error::custom)?;
-        if value != &expected {
-            return Err(serde::ser::Error::custom(
-                "value does not match schema const",
-            ));
-        }
-        serde::Serialize::serialize(value, serializer)
-    }
 }

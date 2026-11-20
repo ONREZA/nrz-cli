@@ -23,6 +23,10 @@ pub enum ContextCommand {
     Use {
         /// Environment ID or exact name
         environment: String,
+
+        /// Explicit Service ID to save with this checkout
+        #[arg(long)]
+        service: Option<uuid::Uuid>,
     },
 
     /// Remove the saved execution context

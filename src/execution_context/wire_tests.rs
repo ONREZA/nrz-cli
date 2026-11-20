@@ -38,7 +38,7 @@ async fn generated_execution_requests_preserve_selection_and_validate_snapshot_b
                     "source":"DEPLOYMENT", "deploymentId":"00000000-0000-0000-0000-000000000099"}}))
         }));
     let (client, server) = serve_api(app).await;
-    let context = resolve(&client, PROJECT_ID, "Production", None, "EXPLICIT")
+    let context = resolve_service(&client, PROJECT_ID, "Production", None, "EXPLICIT", None)
         .await
         .unwrap();
     assert_eq!(context.environment_id, ENVIRONMENT_ID);

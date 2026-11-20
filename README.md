@@ -91,7 +91,7 @@ nrz deploy --prod
 | Database | `nrz db list`, `nrz db query "SELECT 1"`, `nrz db schema`, `nrz db branches` |
 | Remote KV v2 | `nrz kv-v2 regions`, `nrz kv-v2 stores list`, `nrz kv-v2 branches --store <UUID> list`, `nrz kv-v2 data --store <UUID> --branch <UUID> get <key>` |
 | Local KV | `nrz kv get <key> --env preview`, `nrz kv set <key> <value> --ttl 60 --env preview`, `nrz kv list --prefix app_` |
-| Environment | `nrz context use <environment>`, `nrz env list`, `nrz env set`, `nrz env validate`, `nrz env exec -- <command>` |
+| Service environment | `nrz context use <environment> --service <UUID>`, `nrz env list`, `nrz env set`, `nrz env delete`, `nrz env validate`, `nrz env exec -- <command>` |
 | Domains | `nrz domains list`, `nrz domains add example.com`, `nrz domains verify <domain_id>` |
 | Account | `nrz whoami`, `nrz workspace list`, `nrz workspace switch <slug>`, `nrz upgrade` |
 
@@ -101,6 +101,11 @@ or a pinned version such as `nrz upgrade --version v0.33.0-beta.0`.
 Breaking beta migrations and exact required actions are documented in
 [`docs/breaking-changes.md`](docs/breaking-changes.md). Sections marked
 `UNRELEASED` are plans, not current CLI behavior.
+
+For a Product with several Services, pass `--service <UUID>` to `nrz env`
+or select the Service once with `nrz context use`. A single Service is selected
+automatically. Use `--all` to set or delete its default and `--environment`
+to set or delete an override. Deleting the default preserves existing overrides.
 
 ## Test a change in a Product copy
 

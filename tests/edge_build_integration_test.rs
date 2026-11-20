@@ -662,6 +662,15 @@ fn edge_build_publishes_local_handoff_without_legacy_source_mutations() {
     let output_dir = tempfile::tempdir().unwrap();
     fs::write(project.path().join("index.html"), "<h1>Edge build</h1>").unwrap();
 
+    let saved = json!({
+        "version": 1,
+        "environmentId": "00000000-0000-0000-0000-000000000098",
+        "serviceId": "00000000-0000-0000-0000-000000000099"
+    });
+    fs::create_dir(project.path().join(".onreza")).unwrap();
+    let context_path = project.path().join(".onreza/environment.json");
+    fs::write(&context_path, saved.to_string()).unwrap();
+
     let output = edge_build_command(
         project.path(),
         output_dir.path(),
@@ -672,7 +681,16 @@ fn edge_build_publishes_local_handoff_without_legacy_source_mutations() {
     .output()
     .unwrap();
 
-    successful_handoff(&output, "static handoff");
+    let handoff = successful_handoff(&output, "static handoff ignores a different saved Service");
+    assert_eq!(handoff.binding.deployment_id, deployment_id);
+    assert_eq!(
+        handoff.binding.source_environment_id,
+        edge_build_execution_context()["environmentId"]
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&fs::read(context_path).unwrap()).unwrap(),
+        saved
+    );
     assert_eq!(
         fs::read(output_dir.path().join("edge-build-handoff-v2.json")).unwrap(),
         output.stdout

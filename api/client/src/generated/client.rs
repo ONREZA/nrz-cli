@@ -2064,15 +2064,13 @@ impl PlatformClient {
         let response = self.client.get(url).query(&request.query).send().await?;
         Ok(GetV1projectsByIdRuntimeLogsRequest::parse_response(response).await?)
     }
-    /// List project environment variables
+    /// Read Service defaults and Environment overrides
     ///
-    /// Returns project environment variables with secret values redacted.
-    ///
-    /// * Path: `GET /v1/projects/{id}/env`
-    pub async fn get_v1projects_by_id_env(
+    /// * Path: `GET /v1/projects/{id}/services/{serviceId}/config`
+    pub async fn get_v1projects_by_id_services_by_service_id_config(
         &self,
-        request: GetV1projectsByIdEnvRequest,
-    ) -> anyhow::Result<GetV1projectsByIdEnvResponse> {
+        request: GetV1projectsByIdServicesByServiceIdConfigRequest,
+    ) -> anyhow::Result<GetV1projectsByIdServicesByServiceIdConfigResponse> {
         request.validate().context("parameter validation")?;
         let mut url = self.base_url.clone();
         url.path_segments_mut()
@@ -2080,19 +2078,19 @@ impl PlatformClient {
             .push("v1")
             .push("projects")
             .push(&request.path.id.to_string())
-            .push("env");
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("config");
         let response = self.client.get(url).query(&request.query).send().await?;
-        Ok(GetV1projectsByIdEnvRequest::parse_response(response).await?)
+        Ok(GetV1projectsByIdServicesByServiceIdConfigRequest::parse_response(response).await?)
     }
-    /// Set project environment variable
+    /// Write Service defaults or an exact Environment override
     ///
-    /// Creates or updates one project environment variable and returns write-only secret metadata.
-    ///
-    /// * Path: `POST /v1/projects/{id}/env`
-    pub async fn post_v1projects_by_id_env(
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/config`
+    pub async fn put_v1projects_by_id_services_by_service_id_config(
         &self,
-        request: PostV1projectsByIdEnvRequest,
-    ) -> anyhow::Result<PostV1projectsByIdEnvResponse> {
+        request: PutV1projectsByIdServicesByServiceIdConfigRequest,
+    ) -> anyhow::Result<PutV1projectsByIdServicesByServiceIdConfigResponse> {
         request.validate().context("parameter validation")?;
         let mut url = self.base_url.clone();
         url.path_segments_mut()
@@ -2100,19 +2098,19 @@ impl PlatformClient {
             .push("v1")
             .push("projects")
             .push(&request.path.id.to_string())
-            .push("env");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(PostV1projectsByIdEnvRequest::parse_response(response).await?)
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("config");
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(PutV1projectsByIdServicesByServiceIdConfigRequest::parse_response(response).await?)
     }
-    /// Delete project environment variable
+    /// Remove an exact authored target key
     ///
-    /// Deletes one project environment variable.
-    ///
-    /// * Path: `DELETE /v1/projects/{id}/env/{key}`
-    pub async fn delete_v1projects_by_id_env_by_key(
+    /// * Path: `DELETE /v1/projects/{id}/services/{serviceId}/config/{key}`
+    pub async fn delete_v1projects_by_id_services_by_service_id_config_by_key(
         &self,
-        request: DeleteV1projectsByIdEnvByKeyRequest,
-    ) -> anyhow::Result<DeleteV1projectsByIdEnvByKeyResponse> {
+        request: DeleteV1projectsByIdServicesByServiceIdConfigByKeyRequest,
+    ) -> anyhow::Result<PutV1projectsByIdServicesByServiceIdConfigResponse> {
         request.validate().context("parameter validation")?;
         let mut url = self.base_url.clone();
         url.path_segments_mut()
@@ -2120,10 +2118,15 @@ impl PlatformClient {
             .push("v1")
             .push("projects")
             .push(&request.path.id.to_string())
-            .push("env")
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("config")
             .push(&request.path.key.to_string());
-        let response = self.client.delete(url).query(&request.query).send().await?;
-        Ok(DeleteV1projectsByIdEnvByKeyRequest::parse_response(response).await?)
+        let response = self.client.delete(url).json(&request.body).send().await?;
+        Ok(
+            DeleteV1projectsByIdServicesByServiceIdConfigByKeyRequest::parse_response(response)
+                .await?,
+        )
     }
 }
 /// Typed operation transport without consuming response status, headers, or body.
@@ -4030,14 +4033,12 @@ impl PlatformClientRaw {
         let response = self.client.get(url).query(&request.query).send().await?;
         Ok(response)
     }
-    /// List project environment variables
+    /// Read Service defaults and Environment overrides
     ///
-    /// Returns project environment variables with secret values redacted.
-    ///
-    /// * Path: `GET /v1/projects/{id}/env`
-    pub async fn get_v1projects_by_id_env(
+    /// * Path: `GET /v1/projects/{id}/services/{serviceId}/config`
+    pub async fn get_v1projects_by_id_services_by_service_id_config(
         &self,
-        request: GetV1projectsByIdEnvRequest,
+        request: GetV1projectsByIdServicesByServiceIdConfigRequest,
     ) -> anyhow::Result<reqwest::Response> {
         request.validate().context("parameter validation")?;
         let mut url = self.base_url.clone();
@@ -4046,18 +4047,18 @@ impl PlatformClientRaw {
             .push("v1")
             .push("projects")
             .push(&request.path.id.to_string())
-            .push("env");
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("config");
         let response = self.client.get(url).query(&request.query).send().await?;
         Ok(response)
     }
-    /// Set project environment variable
+    /// Write Service defaults or an exact Environment override
     ///
-    /// Creates or updates one project environment variable and returns write-only secret metadata.
-    ///
-    /// * Path: `POST /v1/projects/{id}/env`
-    pub async fn post_v1projects_by_id_env(
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/config`
+    pub async fn put_v1projects_by_id_services_by_service_id_config(
         &self,
-        request: PostV1projectsByIdEnvRequest,
+        request: PutV1projectsByIdServicesByServiceIdConfigRequest,
     ) -> anyhow::Result<reqwest::Response> {
         request.validate().context("parameter validation")?;
         let mut url = self.base_url.clone();
@@ -4066,18 +4067,18 @@ impl PlatformClientRaw {
             .push("v1")
             .push("projects")
             .push(&request.path.id.to_string())
-            .push("env");
-        let response = self.client.post(url).json(&request.body).send().await?;
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("config");
+        let response = self.client.put(url).json(&request.body).send().await?;
         Ok(response)
     }
-    /// Delete project environment variable
+    /// Remove an exact authored target key
     ///
-    /// Deletes one project environment variable.
-    ///
-    /// * Path: `DELETE /v1/projects/{id}/env/{key}`
-    pub async fn delete_v1projects_by_id_env_by_key(
+    /// * Path: `DELETE /v1/projects/{id}/services/{serviceId}/config/{key}`
+    pub async fn delete_v1projects_by_id_services_by_service_id_config_by_key(
         &self,
-        request: DeleteV1projectsByIdEnvByKeyRequest,
+        request: DeleteV1projectsByIdServicesByServiceIdConfigByKeyRequest,
     ) -> anyhow::Result<reqwest::Response> {
         request.validate().context("parameter validation")?;
         let mut url = self.base_url.clone();
@@ -4086,9 +4087,11 @@ impl PlatformClientRaw {
             .push("v1")
             .push("projects")
             .push(&request.path.id.to_string())
-            .push("env")
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("config")
             .push(&request.path.key.to_string());
-        let response = self.client.delete(url).query(&request.query).send().await?;
+        let response = self.client.delete(url).json(&request.body).send().await?;
         Ok(response)
     }
 }

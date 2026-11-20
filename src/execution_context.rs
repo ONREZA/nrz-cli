@@ -76,6 +76,43 @@ pub struct MaterializedExecutionContext {
 struct SavedExecutionContext {
     version: u8,
     environment_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    service_id: Option<String>,
+}
+
+pub(crate) async fn select_service(
+    client: &ApiClient,
+    project_id: &str,
+    project_dir: &Path,
+    explicit: Option<uuid::Uuid>,
+) -> anyhow::Result<uuid::Uuid> {
+    if let Some(service) = explicit {
+        return Ok(service);
+    }
+    if let Some(service) = saved_service_id(project_dir)? {
+        return service.parse().context("invalid saved Service ID");
+    }
+    let services = client
+        .list_services(project_id.parse().context("invalid Product ID")?)
+        .await?;
+    select_single_service(&services.services)
+}
+
+fn select_single_service(
+    services: &[nrz_api::Service200ResponseService],
+) -> anyhow::Result<uuid::Uuid> {
+    let mut available = services
+        .iter()
+        .filter(|service| service.deletion_requested_at.is_none());
+    if let Some(service) = available.next()
+        && available.next().is_none()
+    {
+        return Ok(service.service_id);
+    }
+    Err(output::coded_error(
+        "SERVICE_SELECTION_REQUIRED",
+        "Select a Service with --service <ID> or `nrz context use <environment> --service <ID>`; this Product does not have exactly one available Service",
+    ))
 }
 
 pub async fn run(
@@ -92,9 +129,14 @@ pub async fn run(
             let token = auth::resolve_token(token, workspace)?;
             let client = ApiClient::authenticated(&token)?;
             let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
-            let resolved =
-                resolve_repository_context(&client, &project_id, &saved.environment_id, None)
-                    .await?;
+            let resolved = resolve_repository_context(
+                &client,
+                &project_id,
+                &saved.environment_id,
+                None,
+                saved.service_id.as_deref(),
+            )
+            .await?;
             if json {
                 output::json_output(&resolved);
             } else {
@@ -111,11 +153,24 @@ pub async fn run(
             output::success(json, "Execution context cleared", output::Phase::Env);
             Ok(())
         }
-        ContextCommand::Use { environment } => {
+        ContextCommand::Use {
+            environment,
+            service,
+        } => {
             let token = auth::resolve_token(token, workspace)?;
             let client = ApiClient::authenticated(&token)?;
             let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
-            let resolved = resolve(&client, &project_id, &environment, None, "EXPLICIT").await?;
+            let service =
+                select_service(&client, &project_id, Path::new(&args.dir), service).await?;
+            let resolved = resolve_service(
+                &client,
+                &project_id,
+                &environment,
+                None,
+                "EXPLICIT",
+                Some(&service.to_string()),
+            )
+            .await?;
             save(Path::new(&args.dir), &resolved)?;
             if json {
                 output::json_output(&resolved);
@@ -135,19 +190,16 @@ pub async fn resolve_for_mutation(
     explicit: Option<&str>,
     source_ref: Option<&str>,
 ) -> anyhow::Result<ExecutionContext> {
-    let saved = load_saved(project_dir)?;
-    let process_environment = std::env::var("NRZ_ENVIRONMENT").ok();
-    let selection = select_environment(explicit, process_environment.as_deref(), saved.as_ref())?;
-
-    resolve_selection(client, project_id, source_ref, selection).await
+    resolve_for_service_mutation(client, project_id, project_dir, explicit, source_ref, None).await
 }
 
-pub async fn resolve_optional(
+pub async fn resolve_optional_for_service(
     client: &ApiClient,
     project_id: &str,
     project_dir: &Path,
     explicit: Option<&str>,
     source_ref: Option<&str>,
+    service_id: Option<&str>,
 ) -> anyhow::Result<Option<ExecutionContext>> {
     let saved = load_saved(project_dir)?;
     let process_environment = std::env::var("NRZ_ENVIRONMENT").ok();
@@ -156,7 +208,9 @@ pub async fn resolve_optional(
             Ok(selection) => selection,
             Err(_) => return Ok(None),
         };
-    resolve_selection(client, project_id, source_ref, selection)
+    let service_id =
+        service_id.or_else(|| saved.as_ref().and_then(|saved| saved.service_id.as_deref()));
+    resolve_selection(client, project_id, source_ref, selection, service_id)
         .await
         .map(Some)
 }
@@ -166,16 +220,25 @@ async fn resolve_selection(
     project_id: &str,
     source_ref: Option<&str>,
     selection: EnvironmentSelection,
+    service_id: Option<&str>,
 ) -> anyhow::Result<ExecutionContext> {
     if selection.source == "REPOSITORY" {
-        resolve_repository_context(client, project_id, &selection.selector, source_ref).await
+        resolve_repository_context(
+            client,
+            project_id,
+            &selection.selector,
+            source_ref,
+            service_id,
+        )
+        .await
     } else {
-        resolve(
+        resolve_service(
             client,
             project_id,
             &selection.selector,
             source_ref,
             selection.source,
+            service_id,
         )
         .await
     }
@@ -186,10 +249,18 @@ async fn resolve_repository_context(
     project_id: &str,
     environment_id: &str,
     source_ref: Option<&str>,
+    service_id: Option<&str>,
 ) -> anyhow::Result<ExecutionContext> {
-    resolve(client, project_id, environment_id, source_ref, "REPOSITORY")
-        .await
-        .map_err(map_repository_context_error)
+    resolve_service(
+        client,
+        project_id,
+        environment_id,
+        source_ref,
+        "REPOSITORY",
+        service_id,
+    )
+    .await
+    .map_err(map_repository_context_error)
 }
 
 fn map_repository_context_error(error: anyhow::Error) -> anyhow::Error {
@@ -216,39 +287,11 @@ pub async fn resolve_for_service_mutation(
     let saved = load_saved(project_dir)?;
     let process_environment = std::env::var("NRZ_ENVIRONMENT").ok();
     let selection = select_environment(explicit, process_environment.as_deref(), saved.as_ref())?;
-    let resolved = resolve_service(
-        client,
-        project_id,
-        &selection.selector,
-        source_ref,
-        selection.source,
-        service_id,
-    )
-    .await;
-    if selection.source == "REPOSITORY" {
-        resolved.map_err(map_repository_context_error)
-    } else {
-        resolved
-    }
+    let service_id =
+        service_id.or_else(|| saved.as_ref().and_then(|saved| saved.service_id.as_deref()));
+    resolve_selection(client, project_id, source_ref, selection, service_id).await
 }
 
-pub async fn resolve(
-    client: &ApiClient,
-    project_id: &str,
-    selector: &str,
-    source_ref: Option<&str>,
-    selection_source: &str,
-) -> anyhow::Result<ExecutionContext> {
-    resolve_service(
-        client,
-        project_id,
-        selector,
-        source_ref,
-        selection_source,
-        None,
-    )
-    .await
-}
 async fn resolve_service(
     client: &ApiClient,
     project_id: &str,
@@ -493,6 +536,10 @@ fn select_environment(
     )
 }
 
+pub(crate) fn saved_service_id(project_dir: &Path) -> anyhow::Result<Option<String>> {
+    Ok(load_saved(project_dir)?.and_then(|saved| saved.service_id))
+}
+
 fn load_saved(project_dir: &Path) -> anyhow::Result<Option<SavedExecutionContext>> {
     let path = context_path(project_dir);
     if !path.exists() {
@@ -522,6 +569,7 @@ fn save(project_dir: &Path, context: &ExecutionContext) -> anyhow::Result<()> {
     let saved = SavedExecutionContext {
         version: SAVED_CONTEXT_VERSION,
         environment_id: context.environment_id.clone(),
+        service_id: Some(context.service_id.clone()),
     };
     std::fs::write(&path, serde_json::to_vec_pretty(&saved)?)
         .with_context(|| format!("failed to write {}", path.display()))

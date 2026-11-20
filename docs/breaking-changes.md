@@ -6,6 +6,25 @@ required user actions. Sections marked `UNRELEASED` describe implemented but
 unpublished behavior
 and must receive exact `from`/`to` versions before release.
 
+## 0.52.0 — Service environment variables
+
+Scripts upgrading from 0.51.2 or earlier must select a Service when a Product
+has several. Pass `--service <UUID>` to `nrz env` or save the choice with
+`nrz context use <environment> --service <UUID>`. In a single-Service Product
+the CLI can select the Service automatically.
+
+`nrz env set KEY --all` writes a Service default. To remove just the value in
+QA, use `nrz env delete KEY --environment QA`. If the Service has a default
+for that key, QA inherits it again. To remove the default itself, use
+`nrz env delete KEY --all`. Other Services and explicit overrides keep
+their values. To replace a linked Workspace variable with a value owned by the
+Service, pass `--yes` when setting it.
+
+In JSON mode, `env list` keeps `envVars` and `total`. Rows identify the scope
+with `environmentId`, `environmentIds` and `inherited`. Reads and writes identify
+the selected `serviceId` and `environmentId`. For writes, use the command result
+and key in place of the former `created` flag.
+
 ## 0.41.0: runtime-inspected Functions publication
 
 | Field | Value |
@@ -140,10 +159,9 @@ safety flags reported by CLI remediation. If a key is declared in
 otherwise `--plain` or `--secret` remains mandatory. `--note` writes only
 non-secret metadata.
 
-The current database has one definition per Project/key, not true per-
-Environment overrides. Deletion therefore requires explicit
-`nrz env delete KEY --all`; a targeted delete would otherwise remove the same
-definition from every target while looking local.
+In this release, deleting a legacy Project definition required an explicit
+`nrz env delete KEY --all`. See the 0.52.0 migration above for Service defaults
+and Environment overrides.
 
 `nrz env pull` and `nrz env push` are removed. Server state is authoritative:
 use `nrz env set/delete` for mutations, `nrz env validate` for declaration

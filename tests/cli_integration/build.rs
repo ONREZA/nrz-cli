@@ -477,3 +477,124 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
         );
     }
 }
+
+#[test]
+fn deploy_saved_service_reaches_dry_resolution_and_admission_with_explicit_override() {
+    use axum::{Json, Router, http::StatusCode, routing::post};
+    use std::sync::{Arc, Mutex};
+    use uuid::Uuid;
+
+    for dry in [false, true] {
+        for explicit in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let project = Uuid::now_v7();
+            let environment = Uuid::now_v7();
+            let saved_service = Uuid::now_v7();
+            let explicit_service = Uuid::now_v7();
+            let selected = if explicit {
+                explicit_service
+            } else {
+                saved_service
+            };
+            fs::write(temp.path().join("index.html"), "<h1>local</h1>").unwrap();
+            fs::write(
+                temp.path().join("onreza.toml"),
+                format!("[project]\nid='{project}'\n"),
+            )
+            .unwrap();
+            let calls = Arc::new(Mutex::new(Vec::<(String, serde_json::Value)>::new()));
+            let resolutions = calls.clone();
+            let admissions = calls.clone();
+            let unexpected = calls.clone();
+            let app = Router::new()
+                .route("/v1/projects/{id}/execution-context/resolve", post(move |Json(body): Json<serde_json::Value>| {
+                    resolutions.lock().unwrap().push(("resolve".into(), body.clone()));
+                    async move {
+                        let service = &body["serviceId"];
+                        let context = json!({
+                            "workspaceId": project, "workspaceSlug": "workspace", "productId": project,
+                            "productEnvironmentId": environment, "workspaceEnvironmentId": environment,
+                            "workspaceBindingGeneration": "1", "serviceId": service, "sourceId": project,
+                            "projectId": project, "projectName": "project", "environmentId": environment,
+                            "environmentName": "Production", "environmentType": "PRODUCTION",
+                            "sourceRef": "main", "selectionSource": body["selectionSource"]
+                        });
+                        Json(json!({"protocolVersion": "execution-context-v3", "context": context}))
+                    }
+                }))
+                .route("/v1/projects/{id}/deployments/admit", post(move |Json(body): Json<serde_json::Value>| {
+                    admissions.lock().unwrap().push(("admit".into(), body));
+                    // Observe admission without starting a build or publishing artifacts.
+                    async { (StatusCode::FORBIDDEN, Json(json!({"code": "FORBIDDEN", "message": "admission observed"}))) }
+                }))
+                .fallback(move || {
+                    unexpected.lock().unwrap().push(("unexpected".into(), json!(null)));
+                    async { (StatusCode::FORBIDDEN, Json(json!({"code": "FORBIDDEN", "message": "unexpected default Service path"}))) }
+                });
+            let api = support::api_mock::spawn(app);
+            let command = || {
+                let mut command = nrz();
+                for (key, _) in std::env::vars_os() {
+                    if key.to_string_lossy().starts_with("NRZ_") {
+                        command.env_remove(key);
+                    }
+                }
+                command
+                    .current_dir(temp.path())
+                    .env("NRZ_API_URL", &api)
+                    .env_remove("ONREZA_OUTPUT_DIR")
+                    .args(["--json", "--token", "test-token"]);
+                command
+            };
+            let output = command()
+                .args([
+                    "context",
+                    "use",
+                    &environment.to_string(),
+                    "--service",
+                    &saved_service.to_string(),
+                ])
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let mut deploy = command();
+            deploy.args(["deploy", "--skip-build", "--skip-install"]);
+            if dry {
+                deploy.arg("--dry");
+            }
+            if explicit {
+                deploy.args(["--service-id", &explicit_service.to_string()]);
+            }
+            let output = deploy.output().unwrap();
+            assert_eq!(output.status.success(), dry, "{output:?}");
+            let terminal = stdout_json(&output);
+            if dry {
+                assert_eq!(terminal["schemaVersion"], "DEPLOY_PLAN_V2");
+            } else {
+                assert_eq!(terminal["code"], "FORBIDDEN");
+                assert!(
+                    terminal["error"]
+                        .as_str()
+                        .unwrap()
+                        .contains("admission observed")
+                );
+            }
+            let calls = calls.lock().unwrap();
+            assert_eq!(calls.len(), if dry { 2 } else { 3 }, "{calls:?}");
+            assert_eq!(calls[0].0, "resolve");
+            assert_eq!(calls[0].1["serviceId"], saved_service.to_string());
+            assert_eq!(calls[1].0, "resolve");
+            assert_eq!(calls[1].1["serviceId"], selected.to_string());
+            assert_eq!(calls[1].1["selectionSource"], "REPOSITORY");
+            if !dry {
+                assert_eq!(calls[2].0, "admit");
+                assert_eq!(calls[2].1["serviceId"], selected.to_string());
+                assert_eq!(
+                    calls[2].1["expectedContext"]["serviceId"],
+                    selected.to_string()
+                );
+                assert_eq!(calls[2].1["environmentId"], environment.to_string());
+            }
+        }
+    }
+}

@@ -1,9 +1,15 @@
 use std::io::{IsTerminal, Read, Write};
+use std::path::Path;
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::api::ApiClient;
+use crate::api::{
+    ApiClient, ServiceConfigDeleteBody, ServiceConfigResponse, ServiceConfigSaveBody,
+    ServiceConfigVariable,
+};
+use crate::execution_context::{self, ExecutionContext};
 use crate::output;
 use nrz::config::{EnvVisibility, ProjectConfig};
 
@@ -16,72 +22,52 @@ mod wire_tests;
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EnvListResponse {
-    env_vars: Vec<EnvVar>,
-    total: i64,
+    env_vars: Vec<nrz_api::Config200ResponseEffective>,
+    total: usize,
+    service_id: Uuid,
+    environment_id: Option<Uuid>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct EnvVar {
-    key: String,
-    #[serde(default)]
-    value: Option<String>,
-    is_secret: bool,
-    #[serde(default)]
-    note: Option<String>,
-    #[serde(default)]
-    scope_type: Option<String>,
-    #[serde(default)]
-    preview_branch: Option<String>,
-    #[serde(default)]
-    environments: Vec<EnvVarEnvironment>,
-    #[serde(default)]
-    created_at: Option<String>,
-    #[serde(default)]
-    updated_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct EnvVarEnvironment {
-    id: String,
-    name: Option<String>,
-}
-
-impl From<nrz_api::Env200Response> for EnvListResponse {
-    fn from(value: nrz_api::Env200Response) -> Self {
-        Self {
-            total: value.total,
-            env_vars: value
-                .env_vars
+impl From<ServiceConfigResponse> for EnvListResponse {
+    fn from(value: ServiceConfigResponse) -> Self {
+        let mut env_vars = if value.context.environment.is_some() {
+            value.effective
+        } else {
+            value
+                .variables
                 .into_iter()
-                .map(|variable| EnvVar {
-                    key: variable.key,
-                    value: variable.value,
-                    is_secret: variable.is_secret,
-                    note: variable.note,
-                    scope_type: Some(variable.scope_type.to_string()),
-                    preview_branch: variable.preview_branch,
-                    environments: variable
-                        .environments
-                        .into_iter()
-                        .map(|environment| EnvVarEnvironment {
-                            id: environment.id.to_string(),
-                            name: environment.name,
-                        })
-                        .collect(),
-                    created_at: Some(
-                        variable
-                            .created_at
-                            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
-                    ),
-                    updated_at: Some(
-                        variable
-                            .updated_at
-                            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
-                    ),
+                .filter(|row| row.environment_id.is_none())
+                .map(|row| nrz_api::Config200ResponseEffective {
+                    id: row.id,
+                    key: row.key,
+                    value: row.value,
+                    is_secret: row.is_secret,
+                    note: row.note,
+                    environment_id: row.environment_id,
+                    workspace_env_var_id: row.workspace_env_var_id,
+                    scope_type: row.scope_type,
+                    environment_ids: row.environment_ids,
+                    environment_types: row.environment_types,
+                    preview_branch: row.preview_branch,
+                    updated_at: row.updated_at,
+                    inherited: false,
+                    additional_properties: Default::default(),
                 })
-                .collect(),
+                .collect()
+        };
+        for variable in &mut env_vars {
+            if variable.is_secret {
+                variable.value = None;
+            }
+        }
+        Self {
+            total: env_vars.len(),
+            env_vars,
+            service_id: value.context.service_id,
+            environment_id: value
+                .context
+                .environment
+                .map(|environment| environment.product_environment_id),
         }
     }
 }
@@ -95,18 +81,34 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let (client, project_id) =
         crate::cli::remote::project_client(token, workspace, args.project_id.as_deref(), config)?;
+    run_for_client(&client, &project_id, args, json, config, Path::new(".")).await
+}
+
+async fn run_for_client(
+    client: &ApiClient,
+    project_id: &str,
+    args: EnvArgs,
+    json: bool,
+    config: &ProjectConfig,
+    project_dir: &Path,
+) -> anyhow::Result<()> {
+    let service_id =
+        execution_context::select_service(client, project_id, project_dir, args.service).await?;
+    let product_id = project_id.parse().context("invalid Product ID")?;
+    let service = service_id.to_string();
     match args.command {
-        EnvCommand::List { environment } => {
-            let environment_id = crate::execution_context::resolve_optional(
-                &client,
-                &project_id,
-                std::path::Path::new("."),
+        EnvCommand::List { environment, all } => {
+            let context = resolve_scope(
+                client,
+                project_id,
+                project_dir,
+                &service,
                 environment.as_deref(),
-                None,
+                all,
+                false,
             )
-            .await?
-            .map(|context| context.environment_id);
-            list(&client, &project_id, environment_id.as_deref(), json).await
+            .await?;
+            list(client, product_id, service_id, context.as_ref(), json).await
         }
         EnvCommand::Set {
             key,
@@ -124,63 +126,91 @@ pub async fn run(
         } => {
             let is_secret = resolve_category(secret, plain, config.env_visibility(&key))?;
             let value = read_set_value(value, stdin, from_file.as_deref(), is_secret)?;
-            let (scope_type, environment_ids) = resolve_write_scope(
-                &client,
-                &project_id,
-                std::path::Path::new("."),
+            let context = resolve_scope(
+                client,
+                project_id,
+                project_dir,
+                &service,
                 environment.as_deref(),
                 all,
+                true,
             )
             .await?;
+            let environment_id = context
+                .as_ref()
+                .map(|context| context.environment_id.parse::<Uuid>())
+                .transpose()
+                .context("invalid environment ID")?;
             let safety_prompt = describe_safety_change(
                 &key,
                 is_secret,
-                &scope_type,
-                environment_ids.as_deref(),
+                environment_id,
                 replace_scope,
                 change_category,
             );
             confirm_safety(replace_scope || change_category, yes, stdin, &safety_prompt)?;
             set(
-                &client,
+                client,
                 SetEnvRequest {
-                    project_id: &project_id,
+                    project_id: product_id,
+                    service_id,
                     key: &key,
                     value: &value,
                     is_secret,
                     note: note.as_deref(),
-                    scope_type: &scope_type,
-                    environment_ids,
+                    environment_id,
+                    branch: context
+                        .as_ref()
+                        .and_then(|context| context.source_ref.as_deref()),
                     replace_scope,
                     change_category,
+                    confirmed: yes || replace_scope || change_category,
                     json,
                 },
             )
             .await
         }
-        EnvCommand::Delete { key, all, yes } => {
-            if !all {
-                bail!("legacy environment definitions can only be deleted with explicit --all");
-            }
+        EnvCommand::Delete {
+            key,
+            environment,
+            all,
+            yes,
+        } => {
+            let context = resolve_scope(
+                client,
+                project_id,
+                project_dir,
+                &service,
+                environment.as_deref(),
+                all,
+                true,
+            )
+            .await?;
+            let environment_id = context
+                .as_ref()
+                .map(|context| context.environment_id.parse::<Uuid>())
+                .transpose()
+                .context("invalid environment ID")?;
             confirm_safety(
                 true,
                 yes,
                 false,
-                &format!("Delete the one legacy definition {key} from every target?"),
+                &format!("Delete {key} from {}?", scope_label(environment_id)),
             )?;
-            delete(&client, &project_id, &key, true, json).await
+            delete(client, product_id, service_id, &key, context.as_ref(), json).await
         }
         EnvCommand::Validate { environment } => {
-            let context = crate::execution_context::resolve_for_mutation(
-                &client,
-                &project_id,
-                std::path::Path::new("."),
+            let context = execution_context::resolve_for_service_mutation(
+                client,
+                project_id,
+                project_dir,
                 environment.as_deref(),
                 None,
+                Some(&service),
             )
             .await?;
-            let materialized = crate::execution_context::materialize_desired(
-                &client,
+            let materialized = execution_context::materialize_desired(
+                client,
                 &context,
                 context.source_ref.as_deref(),
                 "EXEC",
@@ -192,17 +222,18 @@ pub async fn run(
             environment,
             command,
         } => {
-            crate::execution_context::warn_local_dotenv_drift(std::path::Path::new("."), json)?;
-            let context = crate::execution_context::resolve_for_mutation(
-                &client,
-                &project_id,
-                std::path::Path::new("."),
+            execution_context::warn_local_dotenv_drift(project_dir, json)?;
+            let context = execution_context::resolve_for_service_mutation(
+                client,
+                project_id,
+                project_dir,
                 environment.as_deref(),
                 None,
+                Some(&service),
             )
             .await?;
-            let materialized = crate::execution_context::materialize_desired(
-                &client,
+            let materialized = execution_context::materialize_desired(
+                client,
                 &context,
                 context.source_ref.as_deref(),
                 "EXEC",
@@ -213,38 +244,76 @@ pub async fn run(
     }
 }
 
-async fn list(
+async fn resolve_scope(
     client: &ApiClient,
     project_id: &str,
-    environment_id: Option<&str>,
+    project_dir: &Path,
+    service: &str,
+    environment: Option<&str>,
+    all: bool,
+    required: bool,
+) -> anyhow::Result<Option<ExecutionContext>> {
+    if all {
+        return Ok(None);
+    }
+    if required {
+        execution_context::resolve_for_service_mutation(
+            client,
+            project_id,
+            project_dir,
+            environment,
+            None,
+            Some(service),
+        )
+        .await
+        .map(Some)
+    } else {
+        execution_context::resolve_optional_for_service(
+            client,
+            project_id,
+            project_dir,
+            environment,
+            None,
+            Some(service),
+        )
+        .await
+    }
+}
+
+async fn list(
+    client: &ApiClient,
+    project_id: Uuid,
+    service_id: Uuid,
+    context: Option<&ExecutionContext>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let mut resp: EnvListResponse = client
-        .environment_variables(project_id)
+    let environment_id = context
+        .map(|context| context.environment_id.parse::<Uuid>())
+        .transpose()
+        .context("invalid environment ID")?;
+    let resp: EnvListResponse = client
+        .service_config(
+            project_id,
+            service_id,
+            environment_id,
+            context.and_then(|context| context.source_ref.as_deref()),
+        )
         .await
-        .context("failed to fetch environment variables")?
+        .context("failed to fetch Service environment variables")?
         .into();
-    if let Some(environment_id) = environment_id {
-        resp.env_vars
-            .retain(|variable| env_var_matches_environment(variable, environment_id));
-        resp.total = resp.env_vars.len() as i64;
-    }
-
     if json {
         output::json_output(&resp);
     } else if resp.env_vars.is_empty() {
         eprintln!("  No environment variables found.");
-        return Ok(());
     } else {
         eprintln!();
         eprintln!(
             "  {:<30} {:<30} {}",
             console::style("Key").bold(),
             console::style("Value").bold(),
-            console::style("Scope").bold(),
+            console::style("Scope").bold()
         );
         eprintln!("  {}", "-".repeat(70));
-
         for v in &resp.env_vars {
             let display_val = if v.is_secret {
                 "*****".to_string()
@@ -257,110 +326,120 @@ async fn list(
         }
         eprintln!();
     }
-
     Ok(())
 }
 
-pub(crate) fn env_var_matches_environment(variable: &EnvVar, environment_id: &str) -> bool {
-    match variable.scope_type.as_deref() {
-        Some("SELECTED") => variable
-            .environments
-            .iter()
-            .any(|environment| environment.id == environment_id),
-        _ => true,
+fn format_scope(variable: &nrz_api::Config200ResponseEffective) -> String {
+    let mut scope = variable.environment_id.map_or_else(
+        || {
+            if variable.scope_type == nrz_api::Project200Response3EnvVarScopeType::Selected {
+                format!(
+                    "DEFAULT ({})",
+                    variable
+                        .environment_ids
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                "DEFAULT".to_string()
+            }
+        },
+        |id| id.to_string(),
+    );
+    if variable.inherited {
+        scope.push_str(" (inherited)");
     }
+    scope
 }
 
-fn format_scope(v: &EnvVar) -> String {
-    match v.scope_type.as_deref() {
-        Some("ALL") | None => "ALL".to_string(),
-        Some("SELECTED") if !v.environments.is_empty() => v
-            .environments
-            .iter()
-            .map(|e| e.name.as_deref().unwrap_or(&e.id))
-            .collect::<Vec<_>>()
-            .join(", "),
-        Some(other) => other.to_string(),
-    }
+fn scope_label(environment_id: Option<Uuid>) -> String {
+    environment_id.map_or_else(
+        || "the Service default".to_string(),
+        |id| format!("Environment override {id}"),
+    )
 }
 
 struct SetEnvRequest<'a> {
-    project_id: &'a str,
+    project_id: Uuid,
+    service_id: Uuid,
     key: &'a str,
     value: &'a str,
     is_secret: bool,
     note: Option<&'a str>,
-    scope_type: &'a str,
-    environment_ids: Option<Vec<String>>,
+    environment_id: Option<Uuid>,
+    branch: Option<&'a str>,
     replace_scope: bool,
     change_category: bool,
+    confirmed: bool,
     json: bool,
 }
 
 async fn set(client: &ApiClient, request: SetEnvRequest<'_>) -> anyhow::Result<()> {
-    let body = nrz_api::EnvRequestBody {
-        key: request.key.to_owned(),
-        value: request.value.to_owned(),
-        is_secret: Some(
-            nrz_api::ProjectRequestBody2IncludeFilesOutsideRoot::Boolean(request.is_secret),
-        ),
-        note: request.note.map(str::to_owned),
-        scope_type: Some(match request.scope_type {
-            "ALL" => nrz_api::Project200Response3EnvVarScopeType::All,
-            "SELECTED" => nrz_api::Project200Response3EnvVarScopeType::Selected,
-            other => bail!("unsupported environment scope: {other}"),
-        }),
-        environment_ids: request
-            .environment_ids
-            .map(|ids| {
-                ids.into_iter()
-                    .map(|id| id.parse())
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .transpose()
-            .context("invalid environment ID")?,
+    let body = ServiceConfigSaveBody {
+        environment_id: request.environment_id,
+        branch: request.branch.map(str::to_owned),
+        variables: vec![ServiceConfigVariable {
+            key: request.key.to_string(),
+            value: Some(request.value.to_string()),
+            is_secret: request.is_secret,
+            note: request.note.map(|note| Some(note.to_string())),
+            ..Default::default()
+        }],
         replace_scope: Some(request.replace_scope),
         change_category: Some(request.change_category),
-        confirmed: Some(true),
+        confirmed: Some(request.confirmed),
         ..Default::default()
     };
-
     let resp = client
-        .set_environment_variable(request.project_id, body)
+        .save_service_config(request.project_id, request.service_id, body)
         .await
-        .context("failed to set environment variable")?;
-
+        .context("failed to set Service environment variable")?;
     if request.json {
-        output::json_output(&resp);
+        output::json_output(
+            &serde_json::json!({"key":request.key,"serviceId":request.service_id,"environmentId":request.environment_id,"message":resp.message}),
+        );
     } else {
-        let action = if resp.created { "Created" } else { "Updated" };
         output::success(
             false,
-            format!("{action} {}", console::style(request.key).bold()),
+            format!("Saved {}", console::style(request.key).bold()),
             output::Phase::Env,
         );
     }
-
     Ok(())
 }
 
 async fn delete(
     client: &ApiClient,
-    project_id: &str,
+    project_id: Uuid,
+    service_id: Uuid,
     key: &str,
-    confirmed: bool,
+    context: Option<&ExecutionContext>,
     json: bool,
 ) -> anyhow::Result<()> {
+    let environment_id = context
+        .map(|context| context.environment_id.parse::<Uuid>())
+        .transpose()
+        .context("invalid environment ID")?;
     let resp = client
-        .delete_environment_variable(project_id, key, confirmed)
+        .delete_service_config(
+            project_id,
+            service_id,
+            key,
+            ServiceConfigDeleteBody {
+                environment_id,
+                branch: context.and_then(|context| context.source_ref.clone()),
+                confirmed: true,
+                ..Default::default()
+            },
+        )
         .await
-        .context("failed to delete environment variable")?;
-
+        .context("failed to delete Service environment variable")?;
     if json {
-        output::json_output(&serde_json::json!({
-            "key": key,
-            "deleted": resp.deleted,
-        }));
+        output::json_output(
+            &serde_json::json!({"key":key,"deleted":true,"serviceId":service_id,"environmentId":environment_id,"message":resp.message}),
+        );
     } else {
         output::success(
             false,
@@ -368,29 +447,7 @@ async fn delete(
             output::Phase::Env,
         );
     }
-
     Ok(())
-}
-
-async fn resolve_write_scope(
-    client: &ApiClient,
-    project_id: &str,
-    project_dir: &std::path::Path,
-    environment: Option<&str>,
-    all: bool,
-) -> anyhow::Result<(String, Option<Vec<String>>)> {
-    if all {
-        return Ok(("ALL".to_string(), None));
-    }
-    let context = crate::execution_context::resolve_for_mutation(
-        client,
-        project_id,
-        project_dir,
-        environment,
-        None,
-    )
-    .await?;
-    Ok(("SELECTED".to_string(), Some(vec![context.environment_id])))
 }
 
 pub(crate) fn read_set_value(
@@ -452,18 +509,13 @@ pub(crate) fn resolve_category(
 fn describe_safety_change(
     key: &str,
     is_secret: bool,
-    scope_type: &str,
-    environment_ids: Option<&[String]>,
+    environment_id: Option<Uuid>,
     replace_scope: bool,
     change_category: bool,
 ) -> String {
     let mut changes = Vec::new();
     if replace_scope {
-        let target = match (scope_type, environment_ids) {
-            ("SELECTED", Some(ids)) => format!("SELECTED ({})", ids.join(", ")),
-            _ => scope_type.to_string(),
-        };
-        changes.push(format!("move the one legacy definition to {target}"));
+        changes.push("replace the existing legacy scope".to_string());
     }
     if change_category {
         changes.push(format!(
@@ -472,7 +524,8 @@ fn describe_safety_change(
         ));
     }
     format!(
-        "Update {key}: {}? This replaces the existing metadata shown by the previous API remediation",
+        "Update {key} in {}: {}?",
+        scope_label(environment_id),
         changes.join(" and ")
     )
 }

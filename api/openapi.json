@@ -39562,12 +39562,11 @@
         "operationId": "getV1ProjectsByIdRuntimeLogs"
       }
     },
-    "/v1/projects/{id}/env": {
+    "/v1/projects/{id}/services/{serviceId}/config": {
       "get": {
-        "summary": "List project environment variables",
-        "description": "Returns project environment variables with secret values redacted.",
+        "summary": "Read Service defaults and Environment overrides",
         "tags": [
-          "Project Env Vars"
+          "Service config"
         ],
         "security": [
           {
@@ -39591,47 +39590,29 @@
             }
           },
           {
-            "name": "scopeType",
-            "in": "query",
-            "required": false,
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
             "schema": {
-              "enum": [
-                "ALL",
-                "SELECTED"
-              ],
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
-            "name": "target",
+            "name": "environmentId",
             "in": "query",
             "required": false,
             "schema": {
-              "enum": [
-                "PRODUCTION",
-                "PREVIEW",
-                "DEVELOPMENT",
-                "CUSTOM"
-              ],
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
-            "name": "keys",
+            "name": "branch",
             "in": "query",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              ]
+              "type": "string"
             }
           }
         ],
@@ -39643,7 +39624,79 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "envVars": {
+                    "context": {
+                      "type": "object",
+                      "properties": {
+                        "workspaceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "serviceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceBindingGeneration": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "environment": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "productId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "productEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "workspaceEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "workspaceBindingGeneration": {
+                                  "type": "string",
+                                  "pattern": "^[1-9][0-9]*$"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "productId",
+                                "productEnvironmentId",
+                                "workspaceEnvironmentId",
+                                "workspaceBindingGeneration"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "workspaceId",
+                        "productId",
+                        "serviceId",
+                        "sourceId",
+                        "workspaceBindingGeneration",
+                        "environment"
+                      ]
+                    },
+                    "variables": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -39653,7 +39706,10 @@
                             "format": "uuid"
                           },
                           "key": {
-                            "type": "string"
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
                           },
                           "value": {
                             "anyOf": [
@@ -39678,12 +39734,53 @@
                               }
                             ]
                           },
+                          "environmentId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "workspaceEnvVarId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "scopeType": {
                             "enum": [
                               "ALL",
                               "SELECTED"
                             ],
                             "type": "string"
+                          },
+                          "environmentIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "environmentTypes": {
+                            "type": "array",
+                            "items": {
+                              "enum": [
+                                "PRODUCTION",
+                                "PREVIEW",
+                                "DEVELOPMENT",
+                                "CUSTOM"
+                              ],
+                              "type": "string"
+                            }
                           },
                           "previewBranch": {
                             "anyOf": [
@@ -39695,49 +39792,8 @@
                               }
                             ]
                           },
-                          "environments": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string",
-                                  "format": "uuid"
-                                },
-                                "name": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                },
-                                "type": {
-                                  "enum": [
-                                    "PRODUCTION",
-                                    "PREVIEW",
-                                    "DEVELOPMENT",
-                                    "CUSTOM"
-                                  ],
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "name",
-                                "type"
-                              ]
-                            }
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
                           "updatedAt": {
-                            "type": "string",
-                            "format": "date-time"
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -39746,23 +39802,141 @@
                           "value",
                           "isSecret",
                           "note",
+                          "environmentId",
+                          "workspaceEnvVarId",
                           "scopeType",
+                          "environmentIds",
+                          "environmentTypes",
                           "previewBranch",
-                          "environments",
-                          "createdAt",
                           "updatedAt"
                         ]
                       }
                     },
-                    "total": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
+                    "effective": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+                          },
+                          "value": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "isSecret": {
+                            "type": "boolean"
+                          },
+                          "note": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "environmentId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "workspaceEnvVarId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "scopeType": {
+                            "enum": [
+                              "ALL",
+                              "SELECTED"
+                            ],
+                            "type": "string"
+                          },
+                          "environmentIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "environmentTypes": {
+                            "type": "array",
+                            "items": {
+                              "enum": [
+                                "PRODUCTION",
+                                "PREVIEW",
+                                "DEVELOPMENT",
+                                "CUSTOM"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "previewBranch": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "inherited": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "key",
+                          "value",
+                          "isSecret",
+                          "note",
+                          "environmentId",
+                          "workspaceEnvVarId",
+                          "scopeType",
+                          "environmentIds",
+                          "environmentTypes",
+                          "previewBranch",
+                          "updatedAt",
+                          "inherited"
+                        ]
+                      }
                     }
                   },
                   "required": [
-                    "envVars",
-                    "total"
+                    "context",
+                    "variables",
+                    "effective"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
                 }
@@ -39910,13 +40084,12 @@
             }
           }
         },
-        "operationId": "getV1ProjectsByIdEnv"
+        "operationId": "getV1ProjectsByIdServicesByServiceIdConfig"
       },
-      "post": {
-        "summary": "Set project environment variable",
-        "description": "Creates or updates one project environment variable and returns write-only secret metadata.",
+      "put": {
+        "summary": "Write Service defaults or an exact Environment override",
         "tags": [
-          "Project Env Vars"
+          "Service config"
         ],
         "security": [
           {
@@ -39938,6 +40111,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
@@ -39947,63 +40129,19 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "key": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
-                  },
-                  "value": {
-                    "type": "string",
-                    "maxLength": 4096
-                  },
-                  "isSecret": {
+                  "environmentId": {
                     "anyOf": [
                       {
-                        "type": "boolean"
+                        "type": "string",
+                        "format": "uuid"
                       },
                       {
-                        "const": "true",
-                        "type": "string"
-                      },
-                      {
-                        "const": "false",
-                        "type": "string"
+                        "type": "null"
                       }
                     ]
                   },
-                  "note": {
-                    "type": "string",
-                    "maxLength": 500
-                  },
-                  "scopeType": {
-                    "enum": [
-                      "ALL",
-                      "SELECTED"
-                    ],
+                  "branch": {
                     "type": "string"
-                  },
-                  "environmentIds": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "uuid"
-                    }
-                  },
-                  "previewBranch": {
-                    "type": "string"
-                  },
-                  "target": {
-                    "type": "array",
-                    "items": {
-                      "enum": [
-                        "PRODUCTION",
-                        "PREVIEW",
-                        "DEVELOPMENT",
-                        "CUSTOM"
-                      ],
-                      "type": "string"
-                    }
                   },
                   "replaceScope": {
                     "type": "boolean"
@@ -40013,11 +40151,49 @@
                   },
                   "confirmed": {
                     "type": "boolean"
+                  },
+                  "variables": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+                        },
+                        "value": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "isSecret": {
+                          "type": "boolean"
+                        },
+                        "note": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 500
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "isSecret"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
                   }
                 },
                 "required": [
-                  "key",
-                  "value"
+                  "environmentId",
+                  "variables"
                 ],
                 "$schema": "https://json-schema.org/draft/2020-12/schema"
               }
@@ -40032,42 +40208,84 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "key": {
-                      "type": "string"
-                    },
-                    "scopeType": {
-                      "enum": [
-                        "ALL",
-                        "SELECTED"
-                      ],
-                      "type": "string"
-                    },
-                    "isSecret": {
-                      "type": "boolean"
-                    },
-                    "created": {
-                      "type": "boolean"
+                    "context": {
+                      "type": "object",
+                      "properties": {
+                        "workspaceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "serviceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceBindingGeneration": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "environment": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "productId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "productEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "workspaceEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "workspaceBindingGeneration": {
+                                  "type": "string",
+                                  "pattern": "^[1-9][0-9]*$"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "productId",
+                                "productEnvironmentId",
+                                "workspaceEnvironmentId",
+                                "workspaceBindingGeneration"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "workspaceId",
+                        "productId",
+                        "serviceId",
+                        "sourceId",
+                        "workspaceBindingGeneration",
+                        "environment"
+                      ]
                     },
                     "message": {
                       "type": "string"
-                    },
-                    "warnings": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
                     }
                   },
                   "required": [
-                    "id",
-                    "key",
-                    "scopeType",
-                    "isSecret",
-                    "created",
+                    "context",
                     "message"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
@@ -40216,15 +40434,14 @@
             }
           }
         },
-        "operationId": "postV1ProjectsByIdEnv"
+        "operationId": "putV1ProjectsByIdServicesByServiceIdConfig"
       }
     },
-    "/v1/projects/{id}/env/{key}": {
+    "/v1/projects/{id}/services/{serviceId}/config/{key}": {
       "delete": {
-        "summary": "Delete project environment variable",
-        "description": "Deletes one project environment variable.",
+        "summary": "Remove an exact authored target key",
         "tags": [
-          "Project Env Vars"
+          "Service config"
         ],
         "security": [
           {
@@ -40240,6 +40457,15 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "serviceId",
             "in": "path",
             "required": true,
             "schema": {
@@ -40257,16 +40483,43 @@
               "maxLength": 128,
               "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
             }
-          },
-          {
-            "name": "confirmed",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "environmentId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "confirmed": {
+                    "const": true,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "environmentId",
+                  "confirmed"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -40275,20 +40528,84 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "deleted": {
-                      "const": true,
-                      "type": "boolean"
-                    },
-                    "key": {
-                      "type": "string"
+                    "context": {
+                      "type": "object",
+                      "properties": {
+                        "workspaceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "serviceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceBindingGeneration": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "environment": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "productId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "productEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "workspaceEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "workspaceBindingGeneration": {
+                                  "type": "string",
+                                  "pattern": "^[1-9][0-9]*$"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "productId",
+                                "productEnvironmentId",
+                                "workspaceEnvironmentId",
+                                "workspaceBindingGeneration"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "workspaceId",
+                        "productId",
+                        "serviceId",
+                        "sourceId",
+                        "workspaceBindingGeneration",
+                        "environment"
+                      ]
                     },
                     "message": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "deleted",
-                    "key",
+                    "context",
                     "message"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
@@ -40437,7 +40754,7 @@
             }
           }
         },
-        "operationId": "deleteV1ProjectsByIdEnvByKey"
+        "operationId": "deleteV1ProjectsByIdServicesByServiceIdConfigByKey"
       }
     }
   },

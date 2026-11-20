@@ -117,7 +117,7 @@ Platform execution context выбирается единообразно:
 | --- | --- |
 | `nrz deploy` | Точный Environment для admission и неизменяемого deployment snapshot. |
 | `nrz dev` | Точный Environment для локальной материализации; `--local` явно отключает platform config. |
-| `nrz env ...` | Точный Environment для list/set/delete/validate/exec; `--all` разрешает явную project-wide мутацию. |
+| `nrz env ...` | Окружение выбранного Service. Для записи или удаления его значения по умолчанию укажите `--all`. |
 | `nrz rules pull/publish/status` | Точный Environment для чтения и публикации Edge Rules. |
 | `nrz functions invoke` | Точный Environment с активной Function revision. |
 | `nrz domains add` | Точный Environment для нового hostname binding. |
@@ -140,7 +140,7 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | `nrz dev [DIR]` | Материализует выбранный Environment snapshot и запускает локальный dev server с ONREZA bootstrap и KV/context emulator. | `--environment`, `--local`, `--alias`, `--command`, `--port`, `--inspect`, `--inspect-brk`, `--db-branch`. `--local` — единственный local-only путь. |
 | `nrz build [DIR]` | Находит output dir, валидирует `.onreza/manifest.json` или генерирует manifest для supported static/SSR outputs. | `--skip-validation`. |
 | `nrz deploy [DIR]` | До сборки выполняет admission, получает неизменяемый Environment snapshot, затем запускает install/build с ним, загружает source/functions и отслеживает live status. Каждый Function entrypoint до publish загружается точным подписанным STABLE runtime; `--dry` выполняет тот же preflight. | `--environment`; `--prod` — compatibility selector для Environment `production` и конфликтует с `--environment`. Также: `--project-id`, `--service-id` для точного Service, `--dry`, `--verify`, `--skip-build`, `--skip-install`, `--build-command`, `--skip-env-check`, `--compute static|process`, `--health-check-path`, `--app` (`--filter` alias). Internal runner resume скрыт из help. |
-| `nrz context ...` | Управляет личным выбором platform Environment для checkout. | `use <ENVIRONMENT>`, `show`, `clear`; состояние хранится в `.onreza/environment.json`. |
+| `nrz context ...` | Сохраняет выбор окружения и сервиса для checkout. | `use <ENVIRONMENT> [--service <UUID>]`, `show`, `clear`. |
 | `nrz detect [DIR]` | Определяет framework, package manager, runtime/build metadata, monorepo packages. | `--slug-only`, `--save`. Internal remote-detection flags `--stdin` и `--needed-files` скрыты из help. |
 | `nrz config explain [DIR]` | Показывает effective build/deploy config с учетом root/app config, CLI override и server project settings. | `--app` (`--filter` alias), `--project-id`, `--service-id`, `--local`. Без `--local` при наличии project id пытается fetch server settings. |
 | `nrz init` | Создает local scaffold (`onreza.toml`, `.onreza/`, `.gitignore`) и опционально создает/линкует platform project. | `--name`, `--skip-detection`, `--create`, `--project-id`, `--local`. В JSON/non-interactive без `--create/--project-id` остается local-only. |
@@ -195,11 +195,15 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 
 ## Env subcommands
 
+Укажите Service через `--service <UUID>` или сохраните его командой
+`nrz context use <environment> --service <UUID>`. Единственный Service
+выбирается автоматически.
+
 | Команда | Назначение | Опции |
 | --- | --- | --- |
-| `nrz env list` | Список metadata переменных проекта без plaintext secrets. | `--environment` фильтрует по точному Environment. |
-| `nrz env set <KEY>` | Создает/обновляет одну переменную. | `--value` для plain; secret только через `--stdin`/`--from-file`; категория берётся из `--secret`/`--plain` или `[env.declarations]`; `--note`; `--environment` или `--all`; destructive category/scope change требует safety flags. |
-| `nrz env delete <KEY> --all` | Удаляет единственную legacy definition ключа. | Требует точный `--all` и подтверждение через prompt/`--yes`; targeted overrides появятся только в новой config model. |
+| `nrz env list` | Показывает переменные выбранного Service. Значения секретов скрыты. | В выбранном окружении учитываются его переопределения. |
+| `nrz env set <KEY>` | Записывает значение по умолчанию (`--all`) или переопределение для окружения. | `--environment <name-or-id>`, `--value` для plain, `--stdin` или `--from-file` для secret. Категорию задаёт `--secret`, `--plain` или `[env.declarations]`. |
+| `nrz env delete <KEY>` | Удаляет значение в выбранной области одного Service. | `--all` удаляет default и сохраняет overrides. Удаление override в `--environment <name-or-id>` открывает унаследованное значение, если оно задано. Для автоматизации используйте `--yes`. |
 | `nrz env validate` | Материализует один context и сверяет key set с `[env.declarations]`. | Значения не выводятся; missing required vars возвращают ошибку. |
 | `nrz env exec -- <COMMAND>` | Запускает процесс с одним materialized Environment snapshot. | Private CLI credentials удаляются из child environment. |
 

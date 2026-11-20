@@ -22,7 +22,7 @@ pub(super) async fn publish_admitted(
 }
 
 async fn run_mode(
-    args: DeployArgs,
+    mut args: DeployArgs,
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
@@ -123,6 +123,10 @@ async fn run_mode(
             output::Phase::Deploy,
         );
         early_project_id = Some(selected.project_id);
+    }
+
+    if runner_context.is_none() && args.service_id.is_none() {
+        args.service_id = crate::execution_context::saved_service_id(&command_context.project_dir)?;
     }
 
     // Fetch project settings from server if project_id is known

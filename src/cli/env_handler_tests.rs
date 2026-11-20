@@ -1,58 +1,8 @@
-use serde_json::json;
-
 use nrz::config::EnvVisibility;
 
 use super::env_handler::{
-    EnvVar, env_var_matches_environment, normalize_stdin_value, read_set_value, resolve_category,
-    validate_materialized_env_for_deploy,
+    normalize_stdin_value, read_set_value, resolve_category, validate_materialized_env_for_deploy,
 };
-
-#[test]
-fn exact_environment_filter_keeps_all_scope() {
-    let variable: EnvVar = serde_json::from_value(json!({
-        "key": "GLOBAL",
-        "value": "x",
-        "isSecret": false,
-        "scopeType": "ALL",
-        "environments": []
-    }))
-    .unwrap();
-
-    assert!(env_var_matches_environment(&variable, "environment-1"));
-}
-
-#[test]
-fn exact_environment_filter_matches_selected_id_only() {
-    let variable: EnvVar = serde_json::from_value(json!({
-        "key": "PREVIEW_ONLY",
-        "value": "x",
-        "isSecret": false,
-        "scopeType": "SELECTED",
-        "environments": [
-            { "id": "environment-1", "name": "Preview", "type": "PREVIEW" }
-        ]
-    }))
-    .unwrap();
-
-    assert!(env_var_matches_environment(&variable, "environment-1"));
-    assert!(!env_var_matches_environment(&variable, "environment-2"));
-}
-
-#[test]
-fn exact_environment_filter_accepts_unnamed_environment() {
-    let variable: EnvVar = serde_json::from_value(json!({
-        "key": "PREVIEW_ONLY",
-        "value": "x",
-        "isSecret": false,
-        "scopeType": "SELECTED",
-        "environments": [
-            { "id": "environment-1", "name": null, "type": "PREVIEW" }
-        ]
-    }))
-    .unwrap();
-
-    assert!(env_var_matches_environment(&variable, "environment-1"));
-}
 
 #[test]
 fn category_uses_explicit_flag_or_project_declaration() {

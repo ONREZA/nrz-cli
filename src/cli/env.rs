@@ -8,6 +8,10 @@ pub struct EnvArgs {
     /// Project ID (skip auto-detection)
     #[arg(long, global = true)]
     pub project_id: Option<String>,
+
+    /// Service ID (required when the Product has multiple Services and none is linked)
+    #[arg(long, global = true)]
+    pub service: Option<uuid::Uuid>,
 }
 
 #[derive(Subcommand)]
@@ -15,8 +19,12 @@ pub enum EnvCommand {
     /// List environment variables
     List {
         /// Exact environment ID or name
-        #[arg(long)]
+        #[arg(long, conflicts_with = "all")]
         environment: Option<String>,
+
+        /// List the Service defaults without selecting an environment
+        #[arg(long, conflicts_with = "environment")]
+        all: bool,
     },
 
     /// Set an environment variable
@@ -52,11 +60,11 @@ pub enum EnvCommand {
         #[arg(long, conflicts_with = "all")]
         environment: Option<String>,
 
-        /// Apply to all project environments
+        /// Set the Service default; existing environment overrides stay unchanged
         #[arg(long, conflicts_with = "environment")]
         all: bool,
 
-        /// Allow replacing the existing environment scope
+        /// Allow replacing an existing legacy scope on this definition
         #[arg(long)]
         replace_scope: bool,
 
@@ -64,7 +72,7 @@ pub enum EnvCommand {
         #[arg(long)]
         change_category: bool,
 
-        /// Confirm a destructive scope/category change non-interactively
+        /// Confirm changing a scope or category, or replacing a linked Workspace value
         #[arg(long)]
         yes: bool,
     },
@@ -74,8 +82,12 @@ pub enum EnvCommand {
         /// Variable name
         key: String,
 
-        /// Delete the project-wide definition
-        #[arg(long)]
+        /// Exact environment ID or name whose override is removed
+        #[arg(long, conflicts_with = "all")]
+        environment: Option<String>,
+
+        /// Delete only the Service default; environment overrides stay unchanged
+        #[arg(long, conflicts_with = "environment")]
         all: bool,
 
         /// Confirm deletion non-interactively

@@ -29,6 +29,7 @@ fn selection_precedence_is_explicit_then_process_then_saved() {
     let saved = SavedExecutionContext {
         version: SAVED_CONTEXT_VERSION,
         environment_id: "saved".into(),
+        service_id: None,
     };
 
     assert_eq!(
@@ -81,7 +82,9 @@ fn saved_context_round_trips_inside_ignored_repository_state() {
         &std::fs::read(directory.path().join(".onreza/environment.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(raw.as_object().unwrap().len(), 2);
+    assert_eq!(raw.as_object().unwrap().len(), 3);
+    assert_eq!(raw["serviceId"], "service-1");
+    assert_eq!(saved.service_id.as_deref(), Some("service-1"));
     assert_eq!(raw["version"], SAVED_CONTEXT_VERSION);
     assert_eq!(raw["environmentId"], "environment-1");
     assert!(directory.path().join(".onreza/environment.json").is_file());
@@ -120,4 +123,43 @@ fn materialized_environment_strips_cli_private_values_and_classifies_exact_secre
             ("SECRET_TOKEN".into(), "secret-value".into()),
         ])
     );
+}
+
+#[test]
+fn service_selection_requires_an_unambiguous_target() {
+    let first = nrz_api::Service200ResponseService {
+        service_id: uuid::Uuid::from_u128(1),
+        is_default: true,
+        ..Default::default()
+    };
+    let second = nrz_api::Service200ResponseService {
+        service_id: uuid::Uuid::from_u128(2),
+        ..Default::default()
+    };
+    assert_eq!(
+        select_single_service(std::slice::from_ref(&first)).unwrap(),
+        first.service_id
+    );
+    assert!(
+        select_single_service(&[first.clone(), second]).is_err(),
+        "historical default must not select one of multiple Services"
+    );
+    let mut retiring = first;
+    retiring.deletion_requested_at = Some("2026-11-20T00:00:00Z".into());
+    assert!(select_single_service(&[retiring]).is_err());
+    assert!(select_single_service(&[]).is_err());
+}
+
+#[test]
+fn existing_environment_context_without_service_still_loads() {
+    let directory = tempdir().unwrap();
+    std::fs::create_dir_all(directory.path().join(".onreza")).unwrap();
+    std::fs::write(
+        directory.path().join(".onreza/environment.json"),
+        r#"{"version":1,"environmentId":"environment-1"}"#,
+    )
+    .unwrap();
+    let saved = load_saved(directory.path()).unwrap().unwrap();
+    assert_eq!(saved.environment_id, "environment-1");
+    assert!(saved.service_id.is_none());
 }
