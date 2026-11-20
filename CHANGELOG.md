@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.51.2] - 2026-11-20
+
+### 🐛 Bug Fixes
+
+- **cli:** preserve cleanup evidence unions ([280b79f](https://github.com/ONREZA/nrz-cli/commit/280b79f01a25bae75146cb7df7bc097ef225855b))
+
 ## [0.51.1] - 2026-11-20
 
 ### 🐛 Bug Fixes
