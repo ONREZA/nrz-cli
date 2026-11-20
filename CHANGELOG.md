@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.51.0] - 2026-11-20
+
+### ✨ Features
+
+- **cli:** add product forks and publication ([28be89d](https://github.com/ONREZA/nrz-cli/commit/28be89dda3abac6eb2c95b40b9a2d1b4720b7f55))
+
 ## [0.50.4] - 2026-11-19
 
 ### 🐛 Bug Fixes
