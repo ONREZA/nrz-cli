@@ -6,7 +6,9 @@ impl ApiClient {
     pub async fn databases(&self) -> anyhow::Result<Database200Response> {
         let response = self
             .platform()?
-            .get_v1kaiki_databases(GetV1kaikiDatabasesRequest {})
+            .get_v1kaiki_databases(GetV1kaikiDatabasesRequest {
+                query: Default::default(),
+            })
             .await?;
         api_success!(
             response,

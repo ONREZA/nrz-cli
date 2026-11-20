@@ -306,7 +306,7 @@ fn domains_add_resolves_environment_and_attaches_zone_relative_hostname() {
         }))
         .route(&format!("/v1/workspace-domains/domains/{zone}/hostnames"), post(move |headers: HeaderMap, Json(body): Json<Value>| async move {
             assert_eq!(headers["X-API-Key"], "test-token");
-            assert_eq!(body,json!({"name":"www","projectId":PROJECT,"environmentId":environment,"redirectFromWww":false}));
+            assert_eq!(body,json!({"name":"www","projectId":PROJECT,"environmentId":environment,"serviceId":Uuid::from_u128(60),"redirectFromWww":false}));
             Json(json!({"hostname":{"id":attachment,"domain":"www.example.com","dnsMode":"EXTERNAL_DNS"}}))
         }));
     let api_url = support::api_mock::spawn(app);

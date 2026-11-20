@@ -27,6 +27,18 @@ mindmap
         info
         update
         delete
+      fork
+        plan
+        create
+        show
+        update
+        retain
+        delete
+        usage
+        policy
+          show
+          set
+          disable
       config
         explain
       detect
@@ -35,6 +47,7 @@ mindmap
       build
       deploy
       deploy-set
+      publish
       context
         show
         use
@@ -129,12 +142,14 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | `nrz deploy [DIR]` | До сборки выполняет admission, получает неизменяемый Environment snapshot, затем запускает install/build с ним, загружает source/functions и отслеживает live status. Каждый Function entrypoint до publish загружается точным подписанным STABLE runtime; `--dry` выполняет тот же preflight. | `--environment`; `--prod` — compatibility selector для Environment `production` и конфликтует с `--environment`. Также: `--project-id`, `--service-id` для точного Service, `--dry`, `--verify`, `--skip-build`, `--skip-install`, `--build-command`, `--skip-env-check`, `--compute static|process`, `--health-check-path`, `--app` (`--filter` alias). Internal runner resume скрыт из help. |
 | `nrz context ...` | Управляет личным выбором platform Environment для checkout. | `use <ENVIRONMENT>`, `show`, `clear`; состояние хранится в `.onreza/environment.json`. |
 | `nrz detect [DIR]` | Определяет framework, package manager, runtime/build metadata, monorepo packages. | `--slug-only`, `--save`. Internal remote-detection flags `--stdin` и `--needed-files` скрыты из help. |
-| `nrz config explain [DIR]` | Показывает effective build/deploy config с учетом root/app config, CLI override и server project settings. | `--app` (`--filter` alias), `--project-id`, `--local`. Без `--local` при наличии project id пытается fetch server settings. |
+| `nrz config explain [DIR]` | Показывает effective build/deploy config с учетом root/app config, CLI override и server project settings. | `--app` (`--filter` alias), `--project-id`, `--service-id`, `--local`. Без `--local` при наличии project id пытается fetch server settings. |
 | `nrz init` | Создает local scaffold (`onreza.toml`, `.onreza/`, `.gitignore`) и опционально создает/линкует platform project. | `--name`, `--skip-detection`, `--create`, `--project-id`, `--local`. В JSON/non-interactive без `--create/--project-id` остается local-only. |
 | `nrz link [DIR]` | Линкует текущую директорию к platform project и обновляет `onreza.toml`. | `--project-id`; в JSON mode обязателен, иначе interactive selection. |
 | `nrz deployments` | Список deployments проекта. | `--limit` (1..100, default 10), `--project-id`. |
 | `nrz logs` | Runtime logs проекта с фильтрацией. | `--deployment-id`, `--project-id`, `--limit` (1..1000, default 50), `--search`. |
 | `nrz deploy-set` | Принимает один выбранный набор Services и ждёт переключение полного состава; остальные Services сохраняют exact accepted references. | `--project-id`, `--environment`, `--all` либо повторяемый `--service-id`; повторяемый `--local SERVICE_ID=PATH` для локальных Sources, `--expected-generation`, `--idempotency-key`. Receipt в `.onreza/deployment-sets` сохраняет первоначальный запрос для unknown-outcome retry. |
+| `nrz fork --product-id <UUID> ...` | Планирует и создаёт копию работающего Product, читает состояние и стоимость, обновляет Services, продлевает срок и запускает очистку; управляет PR policy точного Source. | `plan/create/update --spec <JSON>`; `show/usage/retain/delete <FORK_ID>`; `retain --expires-at <UTC>`; `delete --force` для non-interactive/JSON; `policy <SOURCE_ID> show/set --spec/disable --expected-generation`. |
+| `nrz publish` | Предварительно проверяет или публикует выбранные Services из точного протестированного состава в целевое окружение. | `--target-environment`, `--source-environment`, `--source-composition`, повторяемый `--service`; `--preview` либо UUIDv7 `--idempotency-key`; `--confirmations <JSON>` передаёт точные подтверждения замен из preview. Preview несовместим с ключом и подтверждениями. |
 | `nrz rollback` | Запрашивает новую активацию сохранённого immutable release в выбранном Environment. | `--release-id` или `--composition-id` для активации либо `--list` для списка; `--environment`, `--project-id`, `--service-id`, `--dir`; для `--list` paired cursors `--before-created-at`/`--before-release-id` и `--before-composition-created-at`/`--before-composition-id`. По умолчанию ждёт финального наблюдения текущего rollout; `--finish-observation-early` завершает это наблюдение раньше для этой операции, сохраняя grace и drain. Операция асинхронна; фактический active определяется Edge receipt. |
 | `nrz functions check [DIR]` | Загружает Functions через точный STABLE runtime и проверяет `onreza.rules.toml`. | Runtime скачивается в пользовательский cache при первом Function-check; ошибка `ONREZA_FUNCTIONS_NOT_FOUND`, если нет function entries и rules-файла. |
 | `nrz kv-v2 ...` | Remote binary KV Stores и branches через `/v1/kv-v2`. | `regions`, `stores`, `branches --store <UUID>`, `data --store <UUID> --branch <UUID>`; общий workspace/token resolver. |
@@ -142,7 +157,7 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | `nrz db ...` | Managed PostgreSQL (kaiki) операции. | Management идет через `/v1/kaiki/databases`; выбранный Product видит собственные DB и явно связанные через `projectAttachments`. `query` и `schema` получают connection URI через API и выполняют SQL локально из `nrz`. Exact DB ID задаёт ресурс напрямую с проверкой API authority; выбор по имени/config или auto-resolve требует единственного совпадения в workspace либо выбранном Product. Binding не выводится из Git ref или branch name. |
 | `nrz env ...` | Безопасное управление platform env vars, проверка и запуск команд с материализованным snapshot. | `--project-id` global внутри группы; точный context выбирается через `--environment`/`NRZ_ENVIRONMENT`/`nrz context`. Dotenv pull/push отсутствуют. |
 | `nrz domains ...` | Custom domain hostnames проекта через workspace-domain API. | `--project-id` global внутри `domains`; `add --environment` использует единый execution-context resolver и создает/переиспользует workspace domain zone. |
-| `nrz services ...` | Список Services/Sources, создание отдельного CLI или Git Source, создание/редактирование точного Service и асинхронное удаление с сохранением Product DB/KV. | `list`, `create-source`, `create`, `update <SERVICE_ID>`, `delete <SERVICE_ID>`; `--project-id`, для Git Source — `--git-url`, optional `--git-connection-id`; для configure — `--name`, `--source-id`, `--source-ref`, `--root-directory`. |
+| `nrz services ...` | Список Services/Sources, создание отдельного CLI или Git Source, создание/редактирование точного Service и асинхронное удаление с сохранением Product DB/KV. | `list`, `create-source`, `create`, `update <SERVICE_ID>`, `delete <SERVICE_ID>`; `--project-id`, для Git Source — `--git-url`, optional `--git-connection-id`; для configure — `--name`, `--source-id`, `--source-ref`, `--root-directory`; при создании также `--framework`, `--package-manager`, `--install-command`, `--build-command`, `--output-directory`. |
 | `nrz endpoints ...` | Сеть, exports/imports и фактический applied state точного Service+layer. | Обязательны `--project-id`, `--service-id`, `--environment-id`; `list`, `export <LAYER>`, `import <LAYER>`, `network <LAYER> --file`, `exposure <LAYER> public|private`. Mutations используют `--expected-generation`; grant import требует оба Product права, `--revoke` отзывает свой существующий импорт по его generation. |
 | `nrz projects ...` | CRUD projects через API. | `create --link` также пишет `onreza.toml` в cwd. |
 | `nrz login` | Device flow login или сохранение explicit token. | Если передан `--token`, валидирует `/v1/user` и сохраняет workspace `personal`. |
@@ -193,9 +208,9 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | Команда | Назначение | Опции |
 | --- | --- | --- |
 | `nrz projects list` | Список projects. | `--limit` (1..100, default 20). |
-| `nrz projects create --name <NAME>` | Создает project. | `--display-name`, `--git-url`, `--branch`, `--framework`, `--install-command`, `--build-command`, `--output-directory`, `--link`. |
-| `nrz projects info <ID>` | Детали Product и список его окружений с именами, типами и ID, включая Product без приложения. | JSON содержит `environments`; пустой список показывается явно. App-поля без выбранного Service возвращаются как `null`; app settings commands требуют приложение и возвращают `APPLICATION_SERVICE_REQUIRED`. |
-| `nrz projects update <ID>` | Обновляет project settings. | `--display-name`, `--git-url`, `--branch`, `--framework`, `--install-command`, `--build-command`, `--output-directory`, `--root-directory`, `--node-version`. Без полей падает. |
+| `nrz projects create --name <NAME>` | Создает project. | `--display-name`, `--git-url`, `--branch`, `--framework`, `--package-manager`, `--install-command`, `--build-command`, `--output-directory`, `--link`. Пропущенная branch выбирается по основной ветке репозитория. |
+| `nrz projects info <ID>` | Детали Product и список его окружений с именами, типами и ID, включая Product без приложения. | `--service-id` выбирает приложение в multi-Service Product. JSON содержит `environments`; пустой список показывается явно. App-поля без выбранного Service возвращаются как `null`; app settings commands требуют приложение и возвращают `APPLICATION_SERVICE_REQUIRED`. |
+| `nrz projects update <ID>` | Обновляет project settings. | `--service-id`, `--display-name`, `--git-url`, `--branch`, `--framework`, `--package-manager`, `--install-command`, `--build-command`, `--output-directory`, `--root-directory`, `--node-version`. Без полей падает. |
 | `nrz projects delete <ID>` | Удаляет project. | `--force` для non-interactive/JSON. |
 | `nrz workspace list` | Список локально сохраненных workspaces. | Local config only. |
 | `nrz workspace switch <SLUG>` | Меняет default workspace. | Local config only. |
@@ -205,7 +220,7 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | Команда | Назначение | Опции |
 | --- | --- | --- |
 | `nrz domains list` | Список custom domain hostnames проекта из workspace-domain projection. | `--project-id`. |
-| `nrz domains add <DOMAIN>` | Привязывает hostname к environment через workspace-domain API. | `--environment`; без флага использует `NRZ_ENVIRONMENT` или repository context, без implicit production fallback. |
+| `nrz domains add <DOMAIN>` | Привязывает hostname к Service в environment через workspace-domain API. | `--service-id` обязателен для multi-Service Product; `--environment` либо `NRZ_ENVIRONMENT` или repository context, без implicit production fallback. |
 | `nrz domains remove <DOMAIN_ID>` | Удаляет hostname binding. | `--project-id`. |
 | `nrz domains verify <DOMAIN_ID>` | Запускает verify/check parent workspace domain zone для hostname binding. | `--project-id`. |
 | `nrz kv get <KEY>` | Читает local KV value. | `--env`; expired values считаются отсутствующими. |
@@ -219,7 +234,7 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | `nrz kv-v2 data --store <UUID> --branch <UUID> ...` | Binary get/put/delete, ограниченный keys scan, flush и stats. | `get <KEY>`, `put <KEY> <VALUE> [--durable]`, `delete <KEY> [--durable]`, `keys [--prefix <KEY>] [--after <KEY>] [--limit <1..1024>] [--max-bytes <1..1048576>]`, `flush`, `stats`. `--base64` у get/put/delete/keys задаёт canonical padded base64 входов; иначе входы UTF-8. Ответы сохраняют wire base64. |
 | `nrz functions check [DIR]` | Загружает local Functions точным platform runtime и проверяет rules payload до publish/deploy. | JSON output включает runtime identity, загруженные entrypoints и Edge Rules report. |
 | `nrz functions runtime install/status/path` | Управляет локальным cache точного STABLE runtime. | Обычные `functions check` и `deploy` устанавливают runtime автоматически; эти команды нужны для диагностики и offline-подготовки. |
-| `nrz functions invoke <NAME>` | Вызывает активную Function revision. | `--environment` или общий сохранённый context. |
+| `nrz functions invoke <NAME>` | Вызывает активную Function revision выбранного Service. | `--service-id` обязателен для multi-Service Product; `--environment` или общий сохранённый context. |
 | `nrz rules pull/publish/status` | Читает или публикует user-authored Edge Rules. | `--environment` или общий сохранённый context. |
 
 Remote KV v2 использует buffered acknowledgement по умолчанию и batching window

@@ -22,6 +22,7 @@ mod functions;
 mod identity;
 mod kv_v2;
 mod preview;
+mod product_copy;
 mod projects;
 mod publication;
 mod releases;

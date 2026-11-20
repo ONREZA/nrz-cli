@@ -351,7 +351,7 @@ impl PlatformClient {
             .push("v1")
             .push("projects")
             .push(&request.path.id.to_string());
-        let response = self.client.get(url).send().await?;
+        let response = self.client.get(url).query(&request.query).send().await?;
         Ok(GetV1projectsByIdRequest::parse_response(response).await?)
     }
     /// Delete project
@@ -455,6 +455,190 @@ impl PlatformClient {
                 .await?,
         )
     }
+    /// Preview Product copy topology, blockers and cost assumptions without creating resources
+    ///
+    /// * Path: `POST /v1/product-forks/{productId}/plan`
+    pub async fn post_v1product_forks_by_product_id_plan(
+        &self,
+        request: PostV1productForksByProductIdPlanRequest,
+    ) -> anyhow::Result<PostV1productForksByProductIdPlanResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push("plan");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1productForksByProductIdPlanRequest::parse_response(response).await?)
+    }
+    /// Read measured usage for the copy's exact resource identities
+    ///
+    /// * Path: `GET /v1/product-forks/{productId}/{forkId}/usage`
+    pub async fn get_v1product_forks_by_product_id_by_fork_id_usage(
+        &self,
+        request: GetV1productForksByProductIdByForkIdUsageRequest,
+    ) -> anyhow::Result<GetV1productForksByProductIdByForkIdUsageResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string())
+            .push("usage");
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1productForksByProductIdByForkIdUsageRequest::parse_response(response).await?)
+    }
+    /// Create an isolated Product copy from an explicit parent and resource policy
+    ///
+    /// * Path: `POST /v1/product-forks/{productId}`
+    pub async fn post_v1product_forks_by_product_id(
+        &self,
+        request: PostV1productForksByProductIdRequest,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string());
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1productForksByProductIdRequest::parse_response(response).await?)
+    }
+    /// Read Product copy progress and resource custody
+    ///
+    /// * Path: `GET /v1/product-forks/{productId}/{forkId}`
+    pub async fn get_v1product_forks_by_product_id_by_fork_id(
+        &self,
+        request: GetV1productForksByProductIdByForkIdRequest,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1productForksByProductIdByForkIdRequest::parse_response(response).await?)
+    }
+    /// Request confirmed cleanup of a Product copy
+    ///
+    /// * Path: `DELETE /v1/product-forks/{productId}/{forkId}`
+    pub async fn delete_v1product_forks_by_product_id_by_fork_id(
+        &self,
+        request: DeleteV1productForksByProductIdByForkIdRequest,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string());
+        let response = self.client.delete(url).send().await?;
+        Ok(DeleteV1productForksByProductIdByForkIdRequest::parse_response(response).await?)
+    }
+    /// Retain a Product copy until an explicit expiry
+    ///
+    /// * Path: `PATCH /v1/product-forks/{productId}/{forkId}`
+    pub async fn patch_v1product_forks_by_product_id_by_fork_id(
+        &self,
+        request: PatchV1productForksByProductIdByForkIdRequest,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string());
+        let response = self.client.patch(url).json(&request.body).send().await?;
+        Ok(PatchV1productForksByProductIdByForkIdRequest::parse_response(response).await?)
+    }
+    /// Update selected Services while preserving copy data
+    ///
+    /// * Path: `POST /v1/product-forks/{productId}/{forkId}/update`
+    pub async fn post_v1product_forks_by_product_id_by_fork_id_update(
+        &self,
+        request: PostV1productForksByProductIdByForkIdUpdateRequest,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string())
+            .push("update");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1productForksByProductIdByForkIdUpdateRequest::parse_response(response).await?)
+    }
+    /// Read explicit Git Product-copy policy
+    ///
+    /// * Path: `GET /v1/product-fork-policies/{productId}/{sourceId}`
+    pub async fn get_v1product_fork_policies_by_product_id_by_source_id(
+        &self,
+        request: GetV1productForkPoliciesByProductIdBySourceIdRequest,
+    ) -> anyhow::Result<GetV1productForkPoliciesByProductIdBySourceIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-fork-policies")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.source_id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1productForkPoliciesByProductIdBySourceIdRequest::parse_response(response).await?)
+    }
+    /// Authorize Git Product copies with explicit parent, data and secret decisions
+    ///
+    /// * Path: `PUT /v1/product-fork-policies/{productId}/{sourceId}`
+    pub async fn put_v1product_fork_policies_by_product_id_by_source_id(
+        &self,
+        request: PutV1productForkPoliciesByProductIdBySourceIdRequest,
+    ) -> anyhow::Result<GetV1productForkPoliciesByProductIdBySourceIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-fork-policies")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.source_id.to_string());
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(PutV1productForkPoliciesByProductIdBySourceIdRequest::parse_response(response).await?)
+    }
+    /// Disable Git Product-copy policy without deleting existing copies
+    ///
+    /// * Path: `DELETE /v1/product-fork-policies/{productId}/{sourceId}`
+    pub async fn delete_v1product_fork_policies_by_product_id_by_source_id(
+        &self,
+        request: DeleteV1productForkPoliciesByProductIdBySourceIdRequest,
+    ) -> anyhow::Result<GetV1productForkPoliciesByProductIdBySourceIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-fork-policies")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.source_id.to_string());
+        let response = self.client.delete(url).json(&request.body).send().await?;
+        Ok(
+            DeleteV1productForkPoliciesByProductIdBySourceIdRequest::parse_response(response)
+                .await?,
+        )
+    }
     /// List project environments
     ///
     /// Returns project environments, custom-domain metadata, and resource action capabilities.
@@ -473,6 +657,55 @@ impl PlatformClient {
             .push(&request.path.id.to_string());
         let response = self.client.get(url).send().await?;
         Ok(GetV1environmentsByIdRequest::parse_response(response).await?)
+    }
+    /// Preview selected Services against the last accepted target
+    ///
+    /// * Path: `POST /v1/environments/{id}/actions/preview-publication`
+    pub async fn post_v1environments_by_id_actions_preview_publication(
+        &self,
+        request: PostV1environmentsByIdActionsPreviewPublicationRequest,
+    ) -> anyhow::Result<PostV1environmentsByIdActionsPreviewPublicationResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("actions")
+            .push("preview-publication");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(
+            PostV1environmentsByIdActionsPreviewPublicationRequest::parse_response(response)
+                .await?,
+        )
+    }
+    /// Publish exact tested Services to an Environment
+    ///
+    /// * Path: `POST /v1/environments/{id}/actions/publish-services`
+    pub async fn post_v1environments_by_id_actions_publish_services(
+        &self,
+        request: PostV1environmentsByIdActionsPublishServicesRequest,
+    ) -> anyhow::Result<PostV1environmentsByIdActionsPublishServicesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("actions")
+            .push("publish-services");
+        let response = self
+            .client
+            .post(url)
+            .headers(
+                http::HeaderMap::try_from(&request.header).context("building request headers")?,
+            )
+            .json(&request.body)
+            .send()
+            .await?;
+        Ok(PostV1environmentsByIdActionsPublishServicesRequest::parse_response(response).await?)
     }
     /// List retained environment releases
     ///
@@ -828,7 +1061,7 @@ impl PlatformClient {
             .push("environments")
             .push(&request.path.environment_id.to_string())
             .push("functions");
-        let response = self.client.get(url).send().await?;
+        let response = self.client.get(url).query(&request.query).send().await?;
         Ok(
             GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequest::parse_response(
                     response,
@@ -1221,7 +1454,7 @@ impl PlatformClient {
             .push("kaiki")
             .push("databases")
             .push("");
-        let response = self.client.get(url).send().await?;
+        let response = self.client.get(url).query(&request.query).send().await?;
         Ok(GetV1kaikiDatabasesRequest::parse_response(response).await?)
     }
     /// Create managed database
@@ -2159,7 +2392,7 @@ impl PlatformClientRaw {
             .push("v1")
             .push("projects")
             .push(&request.path.id.to_string());
-        let response = self.client.get(url).send().await?;
+        let response = self.client.get(url).query(&request.query).send().await?;
         Ok(response)
     }
     /// Delete project
@@ -2260,6 +2493,187 @@ impl PlatformClientRaw {
         let response = self.client.delete(url).send().await?;
         Ok(response)
     }
+    /// Preview Product copy topology, blockers and cost assumptions without creating resources
+    ///
+    /// * Path: `POST /v1/product-forks/{productId}/plan`
+    pub async fn post_v1product_forks_by_product_id_plan(
+        &self,
+        request: PostV1productForksByProductIdPlanRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push("plan");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Read measured usage for the copy's exact resource identities
+    ///
+    /// * Path: `GET /v1/product-forks/{productId}/{forkId}/usage`
+    pub async fn get_v1product_forks_by_product_id_by_fork_id_usage(
+        &self,
+        request: GetV1productForksByProductIdByForkIdUsageRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string())
+            .push("usage");
+        let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
+    /// Create an isolated Product copy from an explicit parent and resource policy
+    ///
+    /// * Path: `POST /v1/product-forks/{productId}`
+    pub async fn post_v1product_forks_by_product_id(
+        &self,
+        request: PostV1productForksByProductIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string());
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Read Product copy progress and resource custody
+    ///
+    /// * Path: `GET /v1/product-forks/{productId}/{forkId}`
+    pub async fn get_v1product_forks_by_product_id_by_fork_id(
+        &self,
+        request: GetV1productForksByProductIdByForkIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
+    /// Request confirmed cleanup of a Product copy
+    ///
+    /// * Path: `DELETE /v1/product-forks/{productId}/{forkId}`
+    pub async fn delete_v1product_forks_by_product_id_by_fork_id(
+        &self,
+        request: DeleteV1productForksByProductIdByForkIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string());
+        let response = self.client.delete(url).send().await?;
+        Ok(response)
+    }
+    /// Retain a Product copy until an explicit expiry
+    ///
+    /// * Path: `PATCH /v1/product-forks/{productId}/{forkId}`
+    pub async fn patch_v1product_forks_by_product_id_by_fork_id(
+        &self,
+        request: PatchV1productForksByProductIdByForkIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string());
+        let response = self.client.patch(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Update selected Services while preserving copy data
+    ///
+    /// * Path: `POST /v1/product-forks/{productId}/{forkId}/update`
+    pub async fn post_v1product_forks_by_product_id_by_fork_id_update(
+        &self,
+        request: PostV1productForksByProductIdByForkIdUpdateRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-forks")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.fork_id.to_string())
+            .push("update");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Read explicit Git Product-copy policy
+    ///
+    /// * Path: `GET /v1/product-fork-policies/{productId}/{sourceId}`
+    pub async fn get_v1product_fork_policies_by_product_id_by_source_id(
+        &self,
+        request: GetV1productForkPoliciesByProductIdBySourceIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-fork-policies")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.source_id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
+    /// Authorize Git Product copies with explicit parent, data and secret decisions
+    ///
+    /// * Path: `PUT /v1/product-fork-policies/{productId}/{sourceId}`
+    pub async fn put_v1product_fork_policies_by_product_id_by_source_id(
+        &self,
+        request: PutV1productForkPoliciesByProductIdBySourceIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-fork-policies")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.source_id.to_string());
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Disable Git Product-copy policy without deleting existing copies
+    ///
+    /// * Path: `DELETE /v1/product-fork-policies/{productId}/{sourceId}`
+    pub async fn delete_v1product_fork_policies_by_product_id_by_source_id(
+        &self,
+        request: DeleteV1productForkPoliciesByProductIdBySourceIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("product-fork-policies")
+            .push(&request.path.product_id.to_string())
+            .push(&request.path.source_id.to_string());
+        let response = self.client.delete(url).json(&request.body).send().await?;
+        Ok(response)
+    }
     /// List project environments
     ///
     /// Returns project environments, custom-domain metadata, and resource action capabilities.
@@ -2277,6 +2691,52 @@ impl PlatformClientRaw {
             .push("environments")
             .push(&request.path.id.to_string());
         let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
+    /// Preview selected Services against the last accepted target
+    ///
+    /// * Path: `POST /v1/environments/{id}/actions/preview-publication`
+    pub async fn post_v1environments_by_id_actions_preview_publication(
+        &self,
+        request: PostV1environmentsByIdActionsPreviewPublicationRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("actions")
+            .push("preview-publication");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Publish exact tested Services to an Environment
+    ///
+    /// * Path: `POST /v1/environments/{id}/actions/publish-services`
+    pub async fn post_v1environments_by_id_actions_publish_services(
+        &self,
+        request: PostV1environmentsByIdActionsPublishServicesRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("actions")
+            .push("publish-services");
+        let response = self
+            .client
+            .post(url)
+            .headers(
+                http::HeaderMap::try_from(&request.header).context("building request headers")?,
+            )
+            .json(&request.body)
+            .send()
+            .await?;
         Ok(response)
     }
     /// List retained environment releases
@@ -2626,7 +3086,7 @@ impl PlatformClientRaw {
             .push("environments")
             .push(&request.path.environment_id.to_string())
             .push("functions");
-        let response = self.client.get(url).send().await?;
+        let response = self.client.get(url).query(&request.query).send().await?;
         Ok(response)
     }
     /// * Path: `POST /v1/projects/{id}/function-activations/environments/{environmentId}/functions/{functionId}/revisions/{revisionId}/test-invoke`
@@ -2975,7 +3435,7 @@ impl PlatformClientRaw {
             .push("kaiki")
             .push("databases")
             .push("");
-        let response = self.client.get(url).send().await?;
+        let response = self.client.get(url).query(&request.query).send().await?;
         Ok(response)
     }
     /// Create managed database

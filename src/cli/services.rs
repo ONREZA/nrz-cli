@@ -23,7 +23,7 @@ pub enum ServicesCommand {
         git_connection_id: Option<uuid::Uuid>,
     },
     /// Create a Service using an explicit Source
-    Create(ServiceConfiguration),
+    Create(ServiceCreateConfiguration),
     /// Update one Service without changing neighboring Services
     Update {
         service_id: uuid::Uuid,
@@ -58,4 +58,15 @@ pub struct ServiceConfiguration {
     /// Source root (create: repository root; update: keep the current root)
     #[arg(long)]
     pub root_directory: Option<String>,
+}
+
+#[derive(Args)]
+pub struct ServiceCreateConfiguration {
+    #[command(flatten)]
+    pub configuration: ServiceConfiguration,
+    /// Framework preset for build defaults
+    #[arg(long)]
+    pub framework: Option<String>,
+    #[command(flatten)]
+    pub build: super::projects::ProjectBuildOptions,
 }

@@ -70,8 +70,14 @@ async fn explain(
             selected_app.as_ref().map(|app| app.requested.as_str()),
         )?;
     }
-    let server_settings =
-        apply_server_settings_if_needed(&mut effective, args.local, token, workspace).await?;
+    let server_settings = apply_server_settings_if_needed(
+        &mut effective,
+        args.local,
+        args.service_id,
+        token,
+        workspace,
+    )
+    .await?;
     let explanation = effective.explain()?;
     let output = ConfigExplainOutput {
         root_dir: context.root_dir.display().to_string(),
@@ -97,6 +103,7 @@ async fn explain(
 async fn apply_server_settings_if_needed(
     effective: &mut EffectiveProjectConfig,
     local_only: bool,
+    service_id: Option<uuid::Uuid>,
     token: Option<&str>,
     workspace: Option<&str>,
 ) -> anyhow::Result<ServerSettingsOutput> {
@@ -120,7 +127,9 @@ async fn apply_server_settings_if_needed(
 
     let tok = crate::auth::resolve_token(token, workspace)?;
     let client = crate::api::ApiClient::authenticated(&tok)?;
-    match crate::project_settings::fetch_for_effective_config(&client, &project_id).await? {
+    match crate::project_settings::fetch_for_effective_config(&client, &project_id, service_id)
+        .await?
+    {
         ProjectSettingsFetch::Applied(settings) => {
             effective.apply_server_settings(Some(&settings));
 

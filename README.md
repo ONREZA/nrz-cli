@@ -85,6 +85,8 @@ nrz deploy --prod
 |------|----------|
 | Project | `nrz init`, `nrz link`, `nrz projects list`, `nrz projects create --name <slug>` |
 | Build/Deploy | `nrz detect`, `nrz build`, `nrz deploy`, `nrz rollback` |
+| Product copies | `nrz fork --product-id <UUID> plan --spec <file>`, `create --spec <file>`, `show <fork-id>`, `usage <fork-id>` |
+| Selective releases | `nrz publish --source-environment <UUID> --source-composition <UUID> --target-environment <UUID> --service <UUID> --preview` |
 | Runtime | `nrz deployments`, `nrz logs` |
 | Database | `nrz db list`, `nrz db query "SELECT 1"`, `nrz db schema`, `nrz db branches` |
 | Remote KV v2 | `nrz kv-v2 regions`, `nrz kv-v2 stores list`, `nrz kv-v2 branches --store <UUID> list`, `nrz kv-v2 data --store <UUID> --branch <UUID> get <key>` |
@@ -99,6 +101,28 @@ or a pinned version such as `nrz upgrade --version v0.33.0-beta.0`.
 Breaking beta migrations and exact required actions are documented in
 [`docs/breaking-changes.md`](docs/breaking-changes.md). Sections marked
 `UNRELEASED` are plans, not current CLI behavior.
+
+## Test a change in a Product copy
+
+Pass the same JSON document to `fork plan` and `fork create`. Start the plan with
+the running parent environment ID, a future UTC `expiresAt`, and a stable
+`idempotencyKey`. Supply `databases` for the parent’s database instances and
+`approvedSecretIds` for any secrets you choose to copy.
+The plan lists the parent's Services, database instances, secret IDs and blockers.
+For each database, choose `fork` or `omit` by `sourceDatabaseEnvironmentId`.
+A manual copy can also choose `existing` with an explicit `targetDatabaseEnvironmentId`
+in its selected `targetWorkspaceEnvironmentId`.
+
+After creation, use `fork show` to read progress and the resolved resource IDs.
+Use `fork update` to change Services while keeping the copy's test data. To release
+a tested Service, preview its exact source composition with `nrz publish`, then
+repeat the selection with a UUIDv7 `--idempotency-key`. Git and CLI releases use
+the selected artifact unchanged with the target runtime configuration. If the target Service
+changed, pass the exact replacement from the response through `--confirmations`.
+`fork delete` starts cleanup. Check `fork show` for the outcome and `fork usage`
+for measured charges.
+
+Use `fork policy <source-id> set` to authorize PR copies and `disable` to turn them off.
 
 ## Agent Skills
 
@@ -135,6 +159,8 @@ the value is `null` with a warning; the deployment remains live.
 `--verify`.
 
 `nrz rollback --environment production --list` lists retained releases.
+When a Product moves to another Workspace, each environment starts its release
+history with its current running Services. Earlier releases are unavailable for rollback.
 `nrz rollback --environment production --release-id <release-id>` requests a
 new activation of the selected immutable release. The request reports an
 operation ID and desired generation; Edge receipt determines when it is live.

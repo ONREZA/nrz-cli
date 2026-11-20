@@ -102,7 +102,7 @@ pub async fn run(
             if let Some(ref t) = tok
                 && let Ok(client) = ApiClient::authenticated(t)
             {
-                crate::detect_sync::sync_detection_to_api(&client, &id, result).await;
+                crate::detect_sync::sync_detection_to_api(&client, &id, None, result).await;
             }
         }
         (Some(id), Some(name))
@@ -119,7 +119,8 @@ pub async fn run(
         )?;
         // Sync detection to API (best-effort)
         if let Some(ref result) = detection_result {
-            crate::detect_sync::sync_detection_to_api(&client, &selected.project_id, result).await;
+            crate::detect_sync::sync_detection_to_api(&client, &selected.project_id, None, result)
+                .await;
         }
         if !json {
             output::success(
@@ -146,7 +147,7 @@ pub async fn run(
             if let Some(ref t) = tok
                 && let Ok(client) = ApiClient::authenticated(t)
             {
-                crate::detect_sync::sync_detection_to_api(&client, id, det).await;
+                crate::detect_sync::sync_detection_to_api(&client, id, None, det).await;
             }
         }
         result_ids

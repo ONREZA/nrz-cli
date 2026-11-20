@@ -26,6 +26,10 @@ pub struct ConfigExplainArgs {
     #[arg(long)]
     pub project_id: Option<String>,
 
+    /// Service whose build settings should be explained
+    #[arg(long)]
+    pub service_id: Option<uuid::Uuid>,
+
     /// Explain local onreza.toml config only; do not fetch server project settings
     #[arg(long)]
     pub local: bool,

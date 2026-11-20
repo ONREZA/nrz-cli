@@ -22,8 +22,19 @@ pub async fn run(
         DomainsCommand::List => list(&client, &project_id, json).await,
         DomainsCommand::Add {
             domain,
+            service_id,
             environment,
-        } => add(&client, &project_id, &domain, environment.as_deref(), json).await,
+        } => {
+            add(
+                &client,
+                &project_id,
+                &domain,
+                service_id.as_deref(),
+                environment.as_deref(),
+                json,
+            )
+            .await
+        }
         DomainsCommand::Remove { domain_id } => {
             remove(&client, &project_id, &domain_id, json).await
         }
@@ -81,18 +92,20 @@ async fn add(
     client: &ApiClient,
     project_id: &str,
     domain: &str,
+    service_id: Option<&str>,
     environment: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let env_id = execution_context::resolve_for_mutation(
+    let context = execution_context::resolve_for_service_mutation(
         client,
         project_id,
         std::path::Path::new("."),
         environment,
         None,
+        service_id,
     )
-    .await?
-    .environment_id;
+    .await?;
+    let env_id = context.environment_id;
 
     let zones = client
         .domain_zones()
@@ -103,6 +116,7 @@ async fn add(
         additional_properties: Default::default(),
         name: label,
         project_id: project_id.parse().context("invalid project ID")?,
+        service_id: Some(context.service_id.parse().context("invalid Service ID")?),
         environment_id: env_id.parse().context("invalid environment ID")?,
         redirect_from_www: Some(false),
         replace_record_ids: None,

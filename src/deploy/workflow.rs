@@ -132,7 +132,7 @@ async fn run_mode(
         // The admitted runner snapshot selects this Service before building.
         None
     } else if let Some(ref pid) = early_project_id {
-        match crate::project_settings::fetch_for_effective_config(&client, pid).await? {
+        match crate::project_settings::fetch_for_effective_config(&client, pid, None).await? {
             crate::project_settings::ProjectSettingsFetch::Applied(info) => {
                 tracing::info!(
                     ?info.build_command,
@@ -607,10 +607,12 @@ async fn run_mode(
         // Sync detection results to API (best-effort, non-blocking)
         let sync_client = client.clone();
         let sync_project_id = project_id.clone();
+        let sync_service_id = execution_context.service_id.clone();
         let _sync = tokio::spawn(async move {
             crate::detect_sync::sync_detection_to_api(
                 &sync_client,
                 &sync_project_id,
+                Some(&sync_service_id),
                 &sync_detection,
             )
             .await;
@@ -620,9 +622,11 @@ async fn run_mode(
         if let Some(ref hc) = deploy_health_check {
             let hc_client = client.clone();
             let hc_project_id = project_id.clone();
+            let hc_service_id = execution_context.service_id.clone();
             let hc_clone = hc.clone();
             let _hc = tokio::spawn(async move {
-                sync_compute_config(&hc_client, &hc_project_id, &hc_clone, json).await;
+                sync_compute_config(&hc_client, &hc_project_id, &hc_service_id, &hc_clone, json)
+                    .await;
             });
         }
 

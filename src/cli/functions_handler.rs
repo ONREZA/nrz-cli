@@ -209,16 +209,18 @@ async fn invoke(
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
     let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
-    let environment_id = execution_context::resolve_for_mutation(
+    let context = execution_context::resolve_for_service_mutation(
         &client,
         &project_id,
         &project_dir,
         args.environment.as_deref(),
         None,
+        args.service_id.as_deref(),
     )
-    .await?
-    .environment_id;
-    let functions = list_remote_functions(&client, &project_id, &environment_id).await?;
+    .await?;
+    let environment_id = context.environment_id;
+    let functions =
+        list_remote_functions(&client, &project_id, &environment_id, &context.service_id).await?;
     let function = resolve_function_by_name(&functions.functions, &args.name)?;
     let revision_id = function.activation.active_revision_id.to_string();
     let request = build_test_invoke_request(&args)?;
@@ -257,9 +259,10 @@ async fn list_remote_functions(
     client: &ApiClient,
     project_id: &str,
     environment_id: &str,
+    service_id: &str,
 ) -> anyhow::Result<nrz_api::FunctionListResponse> {
     client
-        .functions(project_id, environment_id)
+        .functions(project_id, environment_id, Some(service_id))
         .await
         .context("failed to list ONREZA Functions")
 }

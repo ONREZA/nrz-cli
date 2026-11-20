@@ -7,8 +7,9 @@ impl ApiClient {
         &self,
         project_id: &str,
         environment_id: &str,
+        service_id: Option<&str>,
     ) -> anyhow::Result<FunctionListResponse> {
-        let response = self.platform()?.get_v1projects_by_id_function_activations_environments_by_environment_id_functions(GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequest { path: GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequestPath { id: project_id.parse().context("invalid project ID")?, environment_id: environment_id.parse().context("invalid environment ID")? },}).await?;
+        let response = self.platform()?.get_v1projects_by_id_function_activations_environments_by_environment_id_functions(GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequest { path: GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequestPath { id: project_id.parse().context("invalid project ID")?, environment_id: environment_id.parse().context("invalid environment ID")? }, query: GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequestQuery { service_id: service_id.map(str::parse).transpose().context("invalid Service ID")? },}).await?;
         api_success!(
             response,
             GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequest,

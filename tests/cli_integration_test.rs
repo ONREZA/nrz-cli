@@ -33,6 +33,8 @@ mod kv;
 mod kv_v2;
 #[path = "cli_integration/platform.rs"]
 mod platform;
+#[path = "cli_integration/product_copy.rs"]
+mod product_copy;
 #[path = "cli_integration/projects.rs"]
 mod projects;
 #[path = "cli_integration/rollback.rs"]

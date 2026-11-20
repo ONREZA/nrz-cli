@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 pub struct ProjectsArgs {
@@ -29,7 +29,7 @@ pub enum ProjectsCommand {
         #[arg(long)]
         git_url: Option<String>,
 
-        /// Git branch (default: main)
+        /// Git branch (defaults to the repository primary branch)
         #[arg(long)]
         branch: Option<String>,
 
@@ -37,17 +37,8 @@ pub enum ProjectsCommand {
         #[arg(long)]
         framework: Option<String>,
 
-        /// Install command
-        #[arg(long)]
-        install_command: Option<String>,
-
-        /// Build command
-        #[arg(long)]
-        build_command: Option<String>,
-
-        /// Output directory
-        #[arg(long)]
-        output_directory: Option<String>,
+        #[command(flatten)]
+        build: ProjectBuildOptions,
 
         /// Link project to current directory after creation
         #[arg(long)]
@@ -56,6 +47,9 @@ pub enum ProjectsCommand {
 
     /// Show project details
     Info {
+        /// Select one Service in a multi-Service Product
+        #[arg(long)]
+        service_id: Option<uuid::Uuid>,
         /// Project ID
         #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
         id: String,
@@ -63,6 +57,9 @@ pub enum ProjectsCommand {
 
     /// Update project settings
     Update {
+        /// Select one Service in a multi-Service Product
+        #[arg(long)]
+        service_id: Option<uuid::Uuid>,
         /// Project ID
         #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]
         id: String,
@@ -83,17 +80,8 @@ pub enum ProjectsCommand {
         #[arg(long)]
         framework: Option<String>,
 
-        /// Install command
-        #[arg(long)]
-        install_command: Option<String>,
-
-        /// Build command
-        #[arg(long)]
-        build_command: Option<String>,
-
-        /// Output directory
-        #[arg(long)]
-        output_directory: Option<String>,
+        #[command(flatten)]
+        build: ProjectBuildOptions,
 
         /// Root directory
         #[arg(long)]
@@ -114,4 +102,23 @@ pub enum ProjectsCommand {
         #[arg(long)]
         force: bool,
     },
+}
+
+#[derive(Args)]
+pub struct ProjectBuildOptions {
+    /// Package manager compatible with the selected framework
+    #[arg(long, value_parser = ["npm", "yarn", "pnpm", "bun", "pip", "uv", "poetry", "pub", "go"])]
+    pub package_manager: Option<String>,
+
+    /// Install command
+    #[arg(long)]
+    pub install_command: Option<String>,
+
+    /// Build command
+    #[arg(long)]
+    pub build_command: Option<String>,
+
+    /// Output directory
+    #[arg(long)]
+    pub output_directory: Option<String>,
 }

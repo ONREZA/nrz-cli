@@ -10,8 +10,6 @@
 
 use serde::{Deserialize, Serialize};
 use validator::Validate;
-static REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| regex::Regex::new("^(0|[1-9][0-9]*)$").expect("invalid regex"));
 static REGEX_ADMIT200RESPONSE_NODE_ID: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[A-Za-z0-9_-]+$").expect("invalid regex"));
 static REGEX_ADMIT200RESPONSE_WRITER_GENERATION: std::sync::LazyLock<regex::Regex> =
@@ -40,6 +38,9 @@ static REGEX_ENDPOINT200RESPONSE_ENDPOINT_NETWORK_PORT_NAME: std::sync::LazyLock
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-zA-Z0-9][a-zA-Z0-9_-]*$").expect("invalid regex")
     });
+static REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION: std::sync::LazyLock<
+    regex::Regex,
+> = std::sync::LazyLock::new(|| regex::Regex::new("^(0|[1-9][0-9]*)$").expect("invalid regex"));
 static REGEX_FAIL_BEFORE_SOURCE_REQUEST_BODY_DIAGNOSTIC_CODE: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[A-Z][A-Z0-9_]*$").expect("invalid regex"));
 static REGEX_FUNCTION_DECLARATION_NAME: std::sync::LazyLock<regex::Regex> =
@@ -55,7 +56,7 @@ static REGEX_GET_V1PROJECTS_REQUEST_QUERY_NAME: std::sync::LazyLock<regex::Regex
     std::sync::LazyLock::new(|| regex::Regex::new("^[a-z0-9-]+$").expect("invalid regex"));
 static REGEX_MATERIALIZE200RESPONSE_SNAPSHOT_FINGERPRINT: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^v1:[0-9a-f]{64}$").expect("invalid regex"));
-static REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_ACTIVATE_RELEASE_REQUEST_HEADER_IDEMPOTENCY_KEY:
+static REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_PUBLISH_SERVICES_REQUEST_HEADER_IDEMPOTENCY_KEY:
     std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
         .expect("invalid regex")
@@ -2415,12 +2416,32 @@ pub struct ApiErrorSourcePresignFailed {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
+pub enum T02 {
+    String(String),
+    Number(f64),
+    Boolean(bool),
+    Array(Vec<T02>),
+    Object(std::collections::HashMap<String, Box<T02>>),
+    Null,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum T03 {
     String(String),
     Number(f64),
     Boolean(bool),
     Array(Vec<T03>),
     Object(std::collections::HashMap<String, Box<T03>>),
+    Null,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum T05 {
+    String(String),
+    Number(f64),
+    Boolean(bool),
+    Array(Vec<T05>),
+    Object(std::collections::HashMap<String, Box<T05>>),
     Null,
 }
 #[derive(
@@ -2485,16 +2506,16 @@ pub struct FunctionDeclaredTrigger {
     #[serde(rename = "type")]
     pub r#type: FunctionDeclaredTriggerType,
     #[serde(default, with = "serde_with::rust::double_option")]
-    pub config: Option<Option<Box<T07>>>,
+    pub config: Option<Option<Box<T09>>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum T07 {
+pub enum T09 {
     String(String),
     Number(f64),
     Boolean(bool),
-    Array(Vec<T07>),
-    Object(std::collections::HashMap<String, Box<T07>>),
+    Array(Vec<T09>),
+    Object(std::collections::HashMap<String, Box<T09>>),
     Null,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
@@ -3160,22 +3181,22 @@ pub struct ManagedDatabaseBranchListItem {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum T09 {
+pub enum T011 {
     String(String),
     Number(f64),
     Boolean(bool),
-    Array(Vec<T09>),
-    Object(std::collections::HashMap<String, Box<T09>>),
+    Array(Vec<T011>),
+    Object(std::collections::HashMap<String, Box<T011>>),
     Null,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum T010 {
+pub enum T012 {
     String(String),
     Number(f64),
     Boolean(bool),
-    Array(Vec<T010>),
-    Object(std::collections::HashMap<String, Box<T010>>),
+    Array(Vec<T012>),
+    Object(std::collections::HashMap<String, Box<T012>>),
     Null,
 }
 #[derive(
@@ -3214,16 +3235,16 @@ pub struct FunctionDeclaredTrigger2 {
     #[serde(rename = "type")]
     pub r#type: FunctionDeclaredTriggerType,
     #[serde(default, with = "serde_with::rust::double_option")]
-    pub config: Option<Option<Box<T011>>>,
+    pub config: Option<Option<Box<T013>>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum T011 {
+pub enum T013 {
     String(String),
     Number(f64),
     Boolean(bool),
-    Array(Vec<T011>),
-    Object(std::collections::HashMap<String, Box<T011>>),
+    Array(Vec<T013>),
+    Object(std::collections::HashMap<String, Box<T013>>),
     Null,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
@@ -4710,6 +4731,37 @@ pub struct ServiceRequestBody {
     #[serde(rename = "rootDirectory")]
     #[validate(length(min = 1u64, max = 1_024u64))]
     pub root_directory: Option<String>,
+    #[serde(rename = "frameworkPreset")]
+    #[validate(length(max = 50u64))]
+    pub framework_preset: Option<String>,
+    #[serde(rename = "detectedFramework")]
+    #[validate(length(max = 50u64))]
+    pub detected_framework: Option<String>,
+    #[serde(rename = "detectedComputeType")]
+    pub detected_compute_type: Option<ServiceRequestBodyDetectedComputeType>,
+    #[serde(rename = "packageManager")]
+    pub package_manager: Option<ServiceRequestBodyPackageManager>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "installCommand"
+    )]
+    pub install_command: Option<Option<String>>,
+    #[serde(rename = "installCommandSource")]
+    pub install_command_source: Option<ServiceRequestBodyInstallCommandSource>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "buildCommand"
+    )]
+    pub build_command: Option<Option<String>>,
+    #[serde(rename = "buildCommandSource")]
+    pub build_command_source: Option<ServiceRequestBodyInstallCommandSource>,
+    #[serde(rename = "outputDirectory")]
+    #[validate(length(max = 500u64))]
+    pub output_directory: Option<String>,
+    #[serde(rename = "outputDirectorySource")]
+    pub output_directory_source: Option<ServiceRequestBodyInstallCommandSource>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1projectsByIdServicesRequestPath {
@@ -4987,6 +5039,23 @@ pub enum DeleteV1projectsByIdServicesByServiceIdResponse {
     ///default: Unknown response
     Unknown,
 }
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceRequestBody2 {
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub name: String,
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
+    #[serde(rename = "sourceRef")]
+    #[validate(length(min = 1u64, max = 256u64))]
+    pub source_ref: Option<String>,
+    #[serde(rename = "rootDirectory")]
+    #[validate(length(min = 1u64, max = 1_024u64))]
+    pub root_directory: Option<String>,
+}
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PatchV1projectsByIdServicesByServiceIdRequestPath {
     pub id: uuid::Uuid,
@@ -4996,7 +5065,7 @@ pub struct PatchV1projectsByIdServicesByServiceIdRequestPath {
 pub struct PatchV1projectsByIdServicesByServiceIdRequest {
     pub path: PatchV1projectsByIdServicesByServiceIdRequestPath,
     #[validate(nested)]
-    pub body: ServiceRequestBody,
+    pub body: ServiceRequestBody2,
 }
 impl PatchV1projectsByIdServicesByServiceIdRequest {
     /// Parse the HTTP response into the response enum.
@@ -5401,7 +5470,6 @@ pub struct ProjectRequestBody {
         length(min = 1u64, max = 50u64),
         regex(path = "REGEX_PROJECT_REQUEST_BODY_BRANCH")
     )]
-    #[default(Some("main".to_string()))]
     pub branch: Option<String>,
     #[serde(rename = "frameworkPreset")]
     #[validate(length(max = 50u64))]
@@ -5413,7 +5481,7 @@ pub struct ProjectRequestBody {
     )]
     pub install_command: Option<Option<String>>,
     #[serde(rename = "installCommandSource")]
-    pub install_command_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub install_command_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(
         default,
         with = "serde_with::rust::double_option",
@@ -5421,12 +5489,12 @@ pub struct ProjectRequestBody {
     )]
     pub build_command: Option<Option<String>>,
     #[serde(rename = "buildCommandSource")]
-    pub build_command_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub build_command_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(rename = "outputDirectory")]
     #[validate(length(max = 500u64))]
     pub output_directory: Option<String>,
     #[serde(rename = "outputDirectorySource")]
-    pub output_directory_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub output_directory_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(rename = "rootDirectory")]
     #[validate(length(max = 500u64))]
     #[default(Some(".".to_string()))]
@@ -5435,12 +5503,12 @@ pub struct ProjectRequestBody {
     #[default(Some(Default::default()))]
     pub auto_deploy_trigger_scope: Option<ProjectRequestBodyAutoDeployTriggerScope>,
     #[serde(rename = "packageManager")]
-    pub package_manager: Option<ProjectRequestBodyPackageManager>,
+    pub package_manager: Option<ServiceRequestBodyPackageManager>,
     #[serde(rename = "detectedFramework")]
     #[validate(length(max = 50u64))]
     pub detected_framework: Option<String>,
     #[serde(rename = "detectedComputeType")]
-    pub detected_compute_type: Option<Project200ResponseProjectDetectedComputeType>,
+    pub detected_compute_type: Option<ServiceRequestBodyDetectedComputeType>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -5576,10 +5644,17 @@ pub enum PostV1projectsResponse {
 pub struct GetV1projectsByIdRequestPath {
     pub id: uuid::Uuid,
 }
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+pub struct GetV1projectsByIdRequestQuery {
+    #[serde(rename = "serviceId")]
+    pub service_id: Option<uuid::Uuid>,
+}
 /// Returns project details, recent deployments, and environment variable summaries.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetV1projectsByIdRequest {
     pub path: GetV1projectsByIdRequestPath,
+    pub query: GetV1projectsByIdRequestQuery,
 }
 impl GetV1projectsByIdRequest {
     /// Parse the HTTP response into the response enum.
@@ -5839,6 +5914,8 @@ pub enum DeleteV1projectsByIdResponse {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct ProjectRequestBody2 {
+    #[serde(rename = "serviceId")]
+    pub service_id: Option<uuid::Uuid>,
     #[serde(rename = "displayName")]
     #[validate(length(max = 100u64))]
     pub display_name: Option<String>,
@@ -5855,7 +5932,7 @@ pub struct ProjectRequestBody2 {
     #[validate(length(max = 50u64))]
     pub framework_preset: Option<String>,
     #[serde(rename = "packageManager")]
-    pub package_manager: Option<ProjectRequestBodyPackageManager>,
+    pub package_manager: Option<ServiceRequestBodyPackageManager>,
     #[serde(
         default,
         with = "serde_with::rust::double_option",
@@ -5863,7 +5940,7 @@ pub struct ProjectRequestBody2 {
     )]
     pub install_command: Option<Option<String>>,
     #[serde(rename = "installCommandSource")]
-    pub install_command_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub install_command_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(
         default,
         with = "serde_with::rust::double_option",
@@ -5871,7 +5948,7 @@ pub struct ProjectRequestBody2 {
     )]
     pub build_command: Option<Option<String>>,
     #[serde(rename = "buildCommandSource")]
-    pub build_command_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub build_command_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(
         default,
         with = "serde_with::rust::double_option",
@@ -5879,7 +5956,7 @@ pub struct ProjectRequestBody2 {
     )]
     pub output_directory: Option<Option<String>>,
     #[serde(rename = "outputDirectorySource")]
-    pub output_directory_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub output_directory_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(rename = "rootDirectory")]
     #[validate(length(max = 500u64))]
     pub root_directory: Option<String>,
@@ -6058,6 +6135,8 @@ pub enum PatchV1projectsByIdResponse {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct DetectionRequestBody {
+    #[serde(rename = "serviceId")]
+    pub service_id: Option<uuid::Uuid>,
     #[validate(length(max = 50u64))]
     pub framework: String,
     #[serde(rename = "frameworkName")]
@@ -6067,9 +6146,9 @@ pub struct DetectionRequestBody {
     #[validate(length(max = 50u64))]
     pub framework_version: Option<String>,
     #[serde(rename = "suggestedCompute")]
-    pub suggested_compute: Project200ResponseProjectDetectedComputeType,
+    pub suggested_compute: ServiceRequestBodyDetectedComputeType,
     #[serde(rename = "packageManager")]
-    pub package_manager: Option<ProjectRequestBodyPackageManager>,
+    pub package_manager: Option<ServiceRequestBodyPackageManager>,
     #[validate(length(max = 20u64))]
     pub source: String,
     /// Additional properties not defined in the schema.
@@ -6453,6 +6532,1370 @@ pub enum DeleteV1domainsByIdPlatformSubdomainsByDomainIdResponse {
     ///default: Unknown response
     Unknown,
 }
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct PlanRequestBody {
+    #[serde(rename = "parentEnvironmentId")]
+    pub parent_environment_id: uuid::Uuid,
+    #[serde(rename = "targetWorkspaceEnvironmentId")]
+    pub target_workspace_environment_id: Option<uuid::Uuid>,
+    #[serde(rename = "targetName")]
+    #[validate(length(min = 1u64, max = 50u64))]
+    pub target_name: Option<String>,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "idempotencyKey")]
+    #[validate(length(min = 1u64, max = 256u64))]
+    pub idempotency_key: String,
+    #[validate(length(max = 256u64))]
+    #[default(Some(Default::default()))]
+    pub databases: Option<Vec<DatabaseKind>>,
+    #[serde(rename = "approvedSecretIds")]
+    #[validate(length(max = 1_024u64))]
+    #[default(Some(Default::default()))]
+    pub approved_secret_ids: Option<Vec<uuid::Uuid>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1productForksByProductIdPlanRequestPath {
+    pub product_id: uuid::Uuid,
+}
+/// Preview Product copy topology, blockers and cost assumptions without creating resources
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1productForksByProductIdPlanRequest {
+    pub path: PostV1productForksByProductIdPlanRequestPath,
+    #[validate(nested)]
+    pub body: PlanRequestBody,
+}
+impl PostV1productForksByProductIdPlanRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1productForksByProductIdPlanResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<Plan200Response>::json_with_diagnostics(req)
+                .await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::Unauthorized(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::PaymentRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::RequestTimeout(
+                data,
+            ));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::ContentTooLarge(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::UpgradeRequired(
+                data,
+            ));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::TooManyRequests(
+                data,
+            ));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdPlanResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1productForksByProductIdPlanResponse::Unknown);
+    }
+}
+/// Response types for postV1ProductForksByProductIdPlan
+#[derive(Debug, Clone)]
+pub enum PostV1productForksByProductIdPlanResponse {
+    ///200: Response for status 200
+    Ok(Plan200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1productForksByProductIdByForkIdUsageRequestPath {
+    pub product_id: uuid::Uuid,
+    pub fork_id: uuid::Uuid,
+}
+/// Read measured usage for the copy's exact resource identities
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1productForksByProductIdByForkIdUsageRequest {
+    pub path: GetV1productForksByProductIdByForkIdUsageRequestPath,
+}
+impl GetV1productForksByProductIdByForkIdUsageRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1productForksByProductIdByForkIdUsageResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Usage200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::NotFound(
+                data,
+            ));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::Conflict(
+                data,
+            ));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::Gone(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForksByProductIdByForkIdUsageResponse::UnprocessableEntity(data),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForksByProductIdByForkIdUsageResponse::InternalServerError(data),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForksByProductIdByForkIdUsageResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1productForksByProductIdByForkIdUsageResponse::Unknown);
+    }
+}
+/// Response types for getV1ProductForksByProductIdByForkIdUsage
+#[derive(Debug, Clone)]
+pub enum GetV1productForksByProductIdByForkIdUsageResponse {
+    ///200: Response for status 200
+    Ok(Usage200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1productForksByProductIdRequestPath {
+    pub product_id: uuid::Uuid,
+}
+/// Create an isolated Product copy from an explicit parent and resource policy
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1productForksByProductIdRequest {
+    pub path: PostV1productForksByProductIdRequestPath,
+    #[validate(nested)]
+    pub body: PlanRequestBody,
+}
+impl PostV1productForksByProductIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<ProductFork200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1productForksByProductIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UnprocessableEntity(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ServiceUnavailable(
+                data,
+            ));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1productForksByProductIdResponse::Unknown);
+    }
+}
+/// Response types for postV1ProductForksByProductId
+#[derive(Debug, Clone)]
+pub enum PostV1productForksByProductIdResponse {
+    ///200: Response for status 200
+    Ok(ProductFork200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1productForksByProductIdByForkIdRequestPath {
+    pub product_id: uuid::Uuid,
+    pub fork_id: uuid::Uuid,
+}
+/// Read Product copy progress and resource custody
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1productForksByProductIdByForkIdRequest {
+    pub path: GetV1productForksByProductIdByForkIdRequestPath,
+}
+impl GetV1productForksByProductIdByForkIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<ProductFork200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1productForksByProductIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UnprocessableEntity(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ServiceUnavailable(
+                data,
+            ));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1productForksByProductIdResponse::Unknown);
+    }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct DeleteV1productForksByProductIdByForkIdRequestPath {
+    pub product_id: uuid::Uuid,
+    pub fork_id: uuid::Uuid,
+}
+/// Request confirmed cleanup of a Product copy
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct DeleteV1productForksByProductIdByForkIdRequest {
+    pub path: DeleteV1productForksByProductIdByForkIdRequestPath,
+}
+impl DeleteV1productForksByProductIdByForkIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<ProductFork200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1productForksByProductIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UnprocessableEntity(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ServiceUnavailable(
+                data,
+            ));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1productForksByProductIdResponse::Unknown);
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct ExpiresAtRequestBody {
+    #[serde(rename = "expiresAt")]
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PatchV1productForksByProductIdByForkIdRequestPath {
+    pub product_id: uuid::Uuid,
+    pub fork_id: uuid::Uuid,
+}
+/// Retain a Product copy until an explicit expiry
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PatchV1productForksByProductIdByForkIdRequest {
+    pub path: PatchV1productForksByProductIdByForkIdRequestPath,
+    pub body: ExpiresAtRequestBody,
+}
+impl PatchV1productForksByProductIdByForkIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<ProductFork200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1productForksByProductIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UnprocessableEntity(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ServiceUnavailable(
+                data,
+            ));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1productForksByProductIdResponse::Unknown);
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct UpdateRequestBody {
+    #[serde(rename = "idempotencyKey")]
+    #[validate(length(min = 1u64, max = 256u64))]
+    pub idempotency_key: String,
+    #[validate(length(min = 1u64, max = 256u64))]
+    pub services: Vec<ServiceKind>,
+    #[serde(rename = "continueRetained")]
+    #[default(Some(false))]
+    pub continue_retained: Option<bool>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1productForksByProductIdByForkIdUpdateRequestPath {
+    pub product_id: uuid::Uuid,
+    pub fork_id: uuid::Uuid,
+}
+/// Update selected Services while preserving copy data
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1productForksByProductIdByForkIdUpdateRequest {
+    pub path: PostV1productForksByProductIdByForkIdUpdateRequestPath,
+    #[validate(nested)]
+    pub body: UpdateRequestBody,
+}
+impl PostV1productForksByProductIdByForkIdUpdateRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1productForksByProductIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<ProductFork200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1productForksByProductIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UnprocessableEntity(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1productForksByProductIdResponse::ServiceUnavailable(
+                data,
+            ));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1productForksByProductIdResponse::Unknown);
+    }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1productForkPoliciesByProductIdBySourceIdRequestPath {
+    pub product_id: uuid::Uuid,
+    pub source_id: uuid::Uuid,
+}
+/// Read explicit Git Product-copy policy
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1productForkPoliciesByProductIdBySourceIdRequest {
+    pub path: GetV1productForkPoliciesByProductIdBySourceIdRequestPath,
+}
+impl GetV1productForkPoliciesByProductIdBySourceIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1productForkPoliciesByProductIdBySourceIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<
+                ProductForkPolicy200Response,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Ok(
+                data,
+            ));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::PaymentRequired(data),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Gone(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::ContentTooLarge(data),
+            );
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::UnprocessableEntity(data),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::UpgradeRequired(data),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::TooManyRequests(data),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::InternalServerError(data),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::ServiceUnavailable(data),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Unknown);
+    }
+}
+/// Response types for getV1ProductForkPoliciesByProductIdBySourceId
+#[derive(Debug, Clone)]
+pub enum GetV1productForkPoliciesByProductIdBySourceIdResponse {
+    ///200: Response for status 200
+    Ok(ProductForkPolicy200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ProductForkPolicyRequestBody {
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "expectedGeneration"
+    )]
+    #[serialize_always]
+    pub expected_generation: Option<String>,
+    #[serde(rename = "parentEnvironmentId")]
+    pub parent_environment_id: uuid::Uuid,
+    #[serde(rename = "serviceIds")]
+    #[validate(length(min = 1u64, max = 256u64))]
+    pub service_ids: Vec<uuid::Uuid>,
+    #[serde(rename = "lifetimeSeconds")]
+    #[validate(range(min = 1i64, max = 9_007_199_254_740_991i64))]
+    pub lifetime_seconds: i64,
+    #[validate(length(max = 256u64))]
+    #[default(Some(Default::default()))]
+    pub databases: Option<Vec<ProductForkPolicy200ResponsePolicyDatabase>>,
+    #[serde(rename = "approvedSecretIds")]
+    #[validate(length(max = 1_024u64))]
+    #[default(Some(Default::default()))]
+    pub approved_secret_ids: Option<Vec<uuid::Uuid>>,
+    #[serde(rename = "executePullRequestCode")]
+    #[serde(
+        deserialize_with = "ProductForkPolicyRequestBody::deserialize_const_execute_pull_request_code"
+    )]
+    #[serde(
+        serialize_with = "ProductForkPolicyRequestBody::serialize_const_execute_pull_request_code"
+    )]
+    #[default(true)]
+    pub execute_pull_request_code: bool,
+}
+impl ProductForkPolicyRequestBody {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_execute_pull_request_code<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<bool, D::Error> {
+        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_execute_pull_request_code<S: serde::Serializer>(
+        value: &bool,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PutV1productForkPoliciesByProductIdBySourceIdRequestPath {
+    pub product_id: uuid::Uuid,
+    pub source_id: uuid::Uuid,
+}
+/// Authorize Git Product copies with explicit parent, data and secret decisions
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PutV1productForkPoliciesByProductIdBySourceIdRequest {
+    pub path: PutV1productForkPoliciesByProductIdBySourceIdRequestPath,
+    #[validate(nested)]
+    pub body: ProductForkPolicyRequestBody,
+}
+impl PutV1productForkPoliciesByProductIdBySourceIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1productForkPoliciesByProductIdBySourceIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<
+                ProductForkPolicy200Response,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Ok(
+                data,
+            ));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::PaymentRequired(data),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Gone(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::ContentTooLarge(data),
+            );
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::UnprocessableEntity(data),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::UpgradeRequired(data),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::TooManyRequests(data),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::InternalServerError(data),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::ServiceUnavailable(data),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Unknown);
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ExpectedGenerationRequestBody {
+    #[serde(rename = "expectedGeneration")]
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub expected_generation: String,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct DeleteV1productForkPoliciesByProductIdBySourceIdRequestPath {
+    pub product_id: uuid::Uuid,
+    pub source_id: uuid::Uuid,
+}
+/// Disable Git Product-copy policy without deleting existing copies
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct DeleteV1productForkPoliciesByProductIdBySourceIdRequest {
+    pub path: DeleteV1productForkPoliciesByProductIdBySourceIdRequestPath,
+    #[validate(nested)]
+    pub body: ExpectedGenerationRequestBody,
+}
+impl DeleteV1productForkPoliciesByProductIdBySourceIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1productForkPoliciesByProductIdBySourceIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<
+                ProductForkPolicy200Response,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Ok(
+                data,
+            ));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::PaymentRequired(data),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Gone(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::ContentTooLarge(data),
+            );
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::UnprocessableEntity(data),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::UpgradeRequired(data),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::TooManyRequests(data),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::InternalServerError(data),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1productForkPoliciesByProductIdBySourceIdResponse::ServiceUnavailable(data),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1productForkPoliciesByProductIdBySourceIdResponse::Unknown);
+    }
+}
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct GetV1environmentsByIdRequestPath {
     pub id: uuid::Uuid,
@@ -6553,6 +7996,365 @@ impl GetV1environmentsByIdRequest {
 pub enum GetV1environmentsByIdResponse {
     ///200: Response for status 200
     Ok(Environment200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewPublicationRequestBody {
+    #[serde(rename = "sourceEnvironmentId")]
+    pub source_environment_id: uuid::Uuid,
+    #[serde(rename = "sourceCompositionId")]
+    pub source_composition_id: uuid::Uuid,
+    #[serde(rename = "serviceIds")]
+    #[validate(length(min = 1u64, max = 4_096u64))]
+    pub service_ids: Vec<uuid::Uuid>,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1environmentsByIdActionsPreviewPublicationRequestPath {
+    pub id: uuid::Uuid,
+}
+/// Preview selected Services against the last accepted target
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1environmentsByIdActionsPreviewPublicationRequest {
+    pub path: PostV1environmentsByIdActionsPreviewPublicationRequestPath,
+    #[validate(nested)]
+    pub body: PreviewPublicationRequestBody,
+}
+impl PostV1environmentsByIdActionsPreviewPublicationRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1environmentsByIdActionsPreviewPublicationResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<
+                PreviewPublication200Response,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(PostV1environmentsByIdActionsPreviewPublicationResponse::Ok(
+                data,
+            ));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPreviewPublicationResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPreviewPublicationResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPreviewPublicationResponse::PaymentRequired(data),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPreviewPublicationResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPreviewPublicationResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPreviewPublicationResponse::RequestTimeout(data),
+            );
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPreviewPublicationResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPreviewPublicationResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPreviewPublicationResponse::ContentTooLarge(data),
+            );
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPreviewPublicationResponse::UnprocessableEntity(data),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPreviewPublicationResponse::UpgradeRequired(data),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPreviewPublicationResponse::TooManyRequests(data),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPreviewPublicationResponse::InternalServerError(data),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPreviewPublicationResponse::ServiceUnavailable(data),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1environmentsByIdActionsPreviewPublicationResponse::Unknown);
+    }
+}
+/// Response types for postV1EnvironmentsByIdActionsPreviewPublication
+#[derive(Debug, Clone)]
+pub enum PostV1environmentsByIdActionsPreviewPublicationResponse {
+    ///200: Response for status 200
+    Ok(PreviewPublication200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct PublishServiceRequestBody {
+    #[serde(rename = "sourceEnvironmentId")]
+    pub source_environment_id: uuid::Uuid,
+    #[serde(rename = "sourceCompositionId")]
+    pub source_composition_id: uuid::Uuid,
+    #[serde(rename = "serviceIds")]
+    #[validate(length(min = 1u64, max = 4_096u64))]
+    pub service_ids: Vec<uuid::Uuid>,
+    #[validate(length(max = 4_096u64))]
+    #[default(Some(Default::default()))]
+    pub confirmations: Option<Vec<PublishServiceRequestBodyConfirmation>>,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1environmentsByIdActionsPublishServicesRequestPath {
+    pub id: uuid::Uuid,
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1environmentsByIdActionsPublishServicesRequestHeader {
+    #[validate(regex(
+        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_PUBLISH_SERVICES_REQUEST_HEADER_IDEMPOTENCY_KEY"
+    ))]
+    pub idempotency_key: String,
+}
+impl core::convert::TryFrom<&PostV1environmentsByIdActionsPublishServicesRequestHeader>
+    for http::HeaderMap
+{
+    type Error = http::header::InvalidHeaderValue;
+    fn try_from(
+        headers: &PostV1environmentsByIdActionsPublishServicesRequestHeader,
+    ) -> core::result::Result<Self, Self::Error> {
+        let mut map = http::HeaderMap::with_capacity(1usize);
+        let header_value = http::HeaderValue::try_from(&headers.idempotency_key)?;
+        map.insert(IDEMPOTENCY_KEY, header_value);
+        Ok(map)
+    }
+}
+impl core::convert::TryFrom<PostV1environmentsByIdActionsPublishServicesRequestHeader>
+    for http::HeaderMap
+{
+    type Error = http::header::InvalidHeaderValue;
+    fn try_from(
+        headers: PostV1environmentsByIdActionsPublishServicesRequestHeader,
+    ) -> core::result::Result<Self, Self::Error> {
+        http::HeaderMap::try_from(&headers)
+    }
+}
+/// Publish exact tested Services to an Environment
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1environmentsByIdActionsPublishServicesRequest {
+    pub path: PostV1environmentsByIdActionsPublishServicesRequestPath,
+    #[validate(nested)]
+    pub header: PostV1environmentsByIdActionsPublishServicesRequestHeader,
+    #[validate(nested)]
+    pub body: PublishServiceRequestBody,
+}
+impl PostV1environmentsByIdActionsPublishServicesRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1environmentsByIdActionsPublishServicesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<PublishService200Response>::json_with_diagnostics(
+                    req,
+                )
+                .await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::Ok(
+                data,
+            ));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::Gone(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPublishServicesResponse::UnprocessableEntity(data),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsPublishServicesResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPublishServicesResponse::InternalServerError(data),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsPublishServicesResponse::ServiceUnavailable(data),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1environmentsByIdActionsPublishServicesResponse::Unknown);
+    }
+}
+/// Response types for postV1EnvironmentsByIdActionsPublishServices
+#[derive(Debug, Clone)]
+pub enum PostV1environmentsByIdActionsPublishServicesResponse {
+    ///200: Response for status 200
+    Ok(PublishService200Response),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -6882,7 +8684,7 @@ pub struct ActivateReleaseRequestBody {
     #[serde(rename = "releaseId")]
     pub release_id: uuid::Uuid,
     #[serde(rename = "expectedGeneration")]
-    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
     pub expected_generation: String,
     #[serde(rename = "finishObservationEarly")]
     #[default(Some(false))]
@@ -6899,7 +8701,7 @@ pub struct PostV1environmentsByIdActionsActivateReleaseRequestPath {
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
 pub struct PostV1environmentsByIdActionsActivateReleaseRequestHeader {
     #[validate(regex(
-        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_ACTIVATE_RELEASE_REQUEST_HEADER_IDEMPOTENCY_KEY"
+        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_PUBLISH_SERVICES_REQUEST_HEADER_IDEMPOTENCY_KEY"
     ))]
     pub idempotency_key: String,
 }
@@ -7078,11 +8880,11 @@ pub struct SetRequestBody {
     #[serde(rename = "environmentId")]
     pub environment_id: uuid::Uuid,
     #[serde(rename = "expectedGeneration")]
-    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
     pub expected_generation: String,
     #[serde(rename = "idempotencyKey")]
     #[validate(regex(
-        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_ACTIVATE_RELEASE_REQUEST_HEADER_IDEMPOTENCY_KEY"
+        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_PUBLISH_SERVICES_REQUEST_HEADER_IDEMPOTENCY_KEY"
     ))]
     pub idempotency_key: String,
     pub selection: SetRequestBodySelection,
@@ -8507,6 +10309,8 @@ pub enum PostV1workspaceDomainsDomainsByZoneIdVerifyResponse {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct HostnameRequestBody {
+    #[serde(rename = "serviceId")]
+    pub service_id: Option<uuid::Uuid>,
     #[validate(length(min = 1u64, max = 255u64))]
     pub name: String,
     #[serde(rename = "projectId")]
@@ -9109,9 +10913,16 @@ pub struct GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFuncti
     pub id: uuid::Uuid,
     pub environment_id: uuid::Uuid,
 }
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+pub struct GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequestQuery {
+    #[serde(rename = "serviceId")]
+    pub service_id: Option<uuid::Uuid>,
+}
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequest {
     pub path: GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequestPath,
+    pub query: GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequestQuery,
 }
 impl GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsRequest {
     /// Parse the HTTP response into the response enum.
@@ -10247,6 +12058,8 @@ pub struct ComputeConfigRequestBody {
     pub idle_timeout_seconds: Option<i64>,
     #[serde(rename = "healthCheckPath")]
     pub health_check_path: Option<serde_json::Value>,
+    #[serde(rename = "serviceId")]
+    pub service_id: Option<uuid::Uuid>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PutV1computeConfigByProjectIdRequestPath {
@@ -12075,9 +13888,17 @@ pub enum PostV1kvV2storesByStoreIdBranchesByBranchIdForkResponse {
     ///default: Unknown response
     Unknown,
 }
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+pub struct GetV1kaikiDatabasesRequestQuery {
+    #[serde(rename = "projectId")]
+    pub project_id: Option<uuid::Uuid>,
+}
 /// Returns managed PostgreSQL databases for the workspace with plan and runtime status metadata.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct GetV1kaikiDatabasesRequest {}
+pub struct GetV1kaikiDatabasesRequest {
+    pub query: GetV1kaikiDatabasesRequestQuery,
+}
 impl GetV1kaikiDatabasesRequest {
     /// Parse the HTTP response into the response enum.
     pub async fn parse_response(
@@ -15562,16 +17383,16 @@ pub struct AdmitSetRequestBody {
     #[serde(rename = "environmentId")]
     pub environment_id: uuid::Uuid,
     #[serde(rename = "expectedGeneration")]
-    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
     pub expected_generation: String,
     #[serde(rename = "idempotencyKey")]
     #[validate(regex(
-        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_ACTIVATE_RELEASE_REQUEST_HEADER_IDEMPOTENCY_KEY"
+        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_PUBLISH_SERVICES_REQUEST_HEADER_IDEMPOTENCY_KEY"
     ))]
     pub idempotency_key: String,
     pub selection: AdmitSetRequestBodySelection,
     #[validate(length(min = 1u64, max = 4_096u64))]
-    pub services: Vec<ServiceKind>,
+    pub services: Vec<ServiceKind2>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1projectsByIdDeploymentsAdmitSetRequestPath {
@@ -17181,10 +19002,6 @@ pub enum ApiErrorLimitDetailsPlanBehavior {
     AntiAbuse,
     #[serde(rename = "operational_limit")]
     OperationalLimit,
-    #[serde(rename = "contractual")]
-    Contractual,
-    #[serde(rename = "support_managed")]
-    SupportManaged,
 }
 impl core::fmt::Display for ApiErrorLimitDetailsPlanBehavior {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -17198,8 +19015,6 @@ impl core::fmt::Display for ApiErrorLimitDetailsPlanBehavior {
             Self::SafetyCap => write!(f, "safety_cap"),
             Self::AntiAbuse => write!(f, "anti_abuse"),
             Self::OperationalLimit => write!(f, "operational_limit"),
-            Self::Contractual => write!(f, "contractual"),
-            Self::SupportManaged => write!(f, "support_managed"),
         }
     }
 }
@@ -17224,8 +19039,12 @@ impl core::fmt::Display for ApiErrorLimitDetailsBillingV2meterModuleKey {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum ApiErrorLimitDetailsBillingV2meterPricingKey {
-    #[serde(rename = "buildMinuteCents")]
+    #[serde(rename = "trafficIngressGbCents")]
     #[default]
+    TrafficIngressGbCents,
+    #[serde(rename = "trafficEgressGbCents")]
+    TrafficEgressGbCents,
+    #[serde(rename = "buildMinuteCents")]
     BuildMinuteCents,
     #[serde(rename = "processCuHourCents")]
     ProcessCuHourCents,
@@ -17253,6 +19072,8 @@ pub enum ApiErrorLimitDetailsBillingV2meterPricingKey {
 impl core::fmt::Display for ApiErrorLimitDetailsBillingV2meterPricingKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::TrafficIngressGbCents => write!(f, "trafficIngressGbCents"),
+            Self::TrafficEgressGbCents => write!(f, "trafficEgressGbCents"),
             Self::BuildMinuteCents => write!(f, "buildMinuteCents"),
             Self::ProcessCuHourCents => write!(f, "processCuHourCents"),
             Self::OnrezaFunctionBfuHourCents => write!(f, "onrezaFunctionBfuHourCents"),
@@ -19534,6 +21355,78 @@ pub struct Service200Response {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ServiceRequestBodyDetectedComputeType {
+    #[serde(rename = "STATIC")]
+    #[default]
+    Static,
+    #[serde(rename = "PROCESS")]
+    Process,
+}
+impl core::fmt::Display for ServiceRequestBodyDetectedComputeType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Static => write!(f, "STATIC"),
+            Self::Process => write!(f, "PROCESS"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ServiceRequestBodyPackageManager {
+    #[serde(rename = "NPM")]
+    #[default]
+    Npm,
+    #[serde(rename = "YARN")]
+    Yarn,
+    #[serde(rename = "PNPM")]
+    Pnpm,
+    #[serde(rename = "BUN")]
+    Bun,
+    #[serde(rename = "PIP")]
+    Pip,
+    #[serde(rename = "UV")]
+    Uv,
+    #[serde(rename = "POETRY")]
+    Poetry,
+    #[serde(rename = "PUB")]
+    Pub,
+    #[serde(rename = "GO")]
+    Go,
+}
+impl core::fmt::Display for ServiceRequestBodyPackageManager {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Npm => write!(f, "NPM"),
+            Self::Yarn => write!(f, "YARN"),
+            Self::Pnpm => write!(f, "PNPM"),
+            Self::Bun => write!(f, "BUN"),
+            Self::Pip => write!(f, "PIP"),
+            Self::Uv => write!(f, "UV"),
+            Self::Poetry => write!(f, "POETRY"),
+            Self::Pub => write!(f, "PUB"),
+            Self::Go => write!(f, "GO"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ServiceRequestBodyInstallCommandSource {
+    #[serde(rename = "PRESET")]
+    #[default]
+    Preset,
+    #[serde(rename = "DETECTED")]
+    Detected,
+    #[serde(rename = "USER")]
+    User,
+}
+impl core::fmt::Display for ServiceRequestBodyInstallCommandSource {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Preset => write!(f, "PRESET"),
+            Self::Detected => write!(f, "DETECTED"),
+            Self::User => write!(f, "USER"),
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct Service200Response2 {
     #[serde(rename = "serviceId")]
@@ -19687,22 +21580,6 @@ impl SourceRequestBodyObject {
         serde::Serialize::serialize(value, serializer)
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum Project200ResponseProjectDetectedComputeType {
-    #[serde(rename = "STATIC")]
-    #[default]
-    Static,
-    #[serde(rename = "PROCESS")]
-    Process,
-}
-impl core::fmt::Display for Project200ResponseProjectDetectedComputeType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Static => write!(f, "STATIC"),
-            Self::Process => write!(f, "PROCESS"),
-        }
-    }
-}
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
@@ -19818,7 +21695,7 @@ pub struct Project200ResponseProject {
         rename = "detectedComputeType"
     )]
     #[serialize_always]
-    pub detected_compute_type: Option<Project200ResponseProjectDetectedComputeType>,
+    pub detected_compute_type: Option<ServiceRequestBodyDetectedComputeType>,
     #[serde(rename = "createdAt")]
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "updatedAt")]
@@ -19848,25 +21725,6 @@ pub struct Project200Response {
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum ProjectRequestBodyInstallCommandSource {
-    #[serde(rename = "PRESET")]
-    #[default]
-    Preset,
-    #[serde(rename = "DETECTED")]
-    Detected,
-    #[serde(rename = "USER")]
-    User,
-}
-impl core::fmt::Display for ProjectRequestBodyInstallCommandSource {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Preset => write!(f, "PRESET"),
-            Self::Detected => write!(f, "DETECTED"),
-            Self::User => write!(f, "USER"),
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum ProjectRequestBodyAutoDeployTriggerScope {
     #[serde(rename = "REPOSITORY")]
     #[default]
@@ -19879,43 +21737,6 @@ impl core::fmt::Display for ProjectRequestBodyAutoDeployTriggerScope {
         match self {
             Self::Repository => write!(f, "REPOSITORY"),
             Self::RootDirectory => write!(f, "ROOT_DIRECTORY"),
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum ProjectRequestBodyPackageManager {
-    #[serde(rename = "NPM")]
-    #[default]
-    Npm,
-    #[serde(rename = "YARN")]
-    Yarn,
-    #[serde(rename = "PNPM")]
-    Pnpm,
-    #[serde(rename = "BUN")]
-    Bun,
-    #[serde(rename = "PIP")]
-    Pip,
-    #[serde(rename = "UV")]
-    Uv,
-    #[serde(rename = "POETRY")]
-    Poetry,
-    #[serde(rename = "PUB")]
-    Pub,
-    #[serde(rename = "GO")]
-    Go,
-}
-impl core::fmt::Display for ProjectRequestBodyPackageManager {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Npm => write!(f, "NPM"),
-            Self::Yarn => write!(f, "YARN"),
-            Self::Pnpm => write!(f, "PNPM"),
-            Self::Bun => write!(f, "BUN"),
-            Self::Pip => write!(f, "PIP"),
-            Self::Uv => write!(f, "UV"),
-            Self::Poetry => write!(f, "POETRY"),
-            Self::Pub => write!(f, "PUB"),
-            Self::Go => write!(f, "GO"),
         }
     }
 }
@@ -19963,7 +21784,7 @@ pub struct Project200Response2 {
         rename = "detectedComputeType"
     )]
     #[serialize_always]
-    pub detected_compute_type: Option<Project200ResponseProjectDetectedComputeType>,
+    pub detected_compute_type: Option<ServiceRequestBodyDetectedComputeType>,
     #[serde(rename = "autoDeployTriggerScope")]
     pub auto_deploy_trigger_scope: ProjectRequestBodyAutoDeployTriggerScope,
     #[serde(rename = "createdAt")]
@@ -20473,7 +22294,7 @@ pub struct Project200Response3 {
         rename = "installCommandSource"
     )]
     #[serialize_always]
-    pub install_command_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub install_command_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(deserialize_with = "Option::deserialize", rename = "buildCommand")]
     #[serialize_always]
     pub build_command: Option<String>,
@@ -20482,7 +22303,7 @@ pub struct Project200Response3 {
         rename = "buildCommandSource"
     )]
     #[serialize_always]
-    pub build_command_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub build_command_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(deserialize_with = "Option::deserialize", rename = "outputDirectory")]
     #[serialize_always]
     pub output_directory: Option<String>,
@@ -20491,7 +22312,7 @@ pub struct Project200Response3 {
         rename = "outputDirectorySource"
     )]
     #[serialize_always]
-    pub output_directory_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub output_directory_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "buildTimeoutMinutes"
@@ -20512,7 +22333,7 @@ pub struct Project200Response3 {
     pub node_version: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "packageManager")]
     #[serialize_always]
-    pub package_manager: Option<ProjectRequestBodyPackageManager>,
+    pub package_manager: Option<ServiceRequestBodyPackageManager>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "ignoredBuildBehavior"
@@ -20606,7 +22427,7 @@ pub struct Project200Response3 {
         rename = "detectedComputeType"
     )]
     #[serialize_always]
-    pub detected_compute_type: Option<Project200ResponseProjectDetectedComputeType>,
+    pub detected_compute_type: Option<ServiceRequestBodyDetectedComputeType>,
     #[serde(deserialize_with = "Option::deserialize", rename = "detectionSource")]
     #[serialize_always]
     pub detection_source: Option<String>,
@@ -20773,6 +22594,86 @@ impl core::fmt::Display for DomainResponseItemTlsStatus {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum DomainResponseItemCertificateProgressPhase {
+    #[serde(rename = "READY")]
+    #[default]
+    Ready,
+    #[serde(rename = "QUEUED")]
+    Queued,
+    #[serde(rename = "CREATING")]
+    Creating,
+    #[serde(rename = "CHALLENGE")]
+    Challenge,
+    #[serde(rename = "VALIDATING")]
+    Validating,
+    #[serde(rename = "FINALIZING")]
+    Finalizing,
+    #[serde(rename = "RECOVERING")]
+    Recovering,
+}
+impl core::fmt::Display for DomainResponseItemCertificateProgressPhase {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Ready => write!(f, "READY"),
+            Self::Queued => write!(f, "QUEUED"),
+            Self::Creating => write!(f, "CREATING"),
+            Self::Challenge => write!(f, "CHALLENGE"),
+            Self::Validating => write!(f, "VALIDATING"),
+            Self::Finalizing => write!(f, "FINALIZING"),
+            Self::Recovering => write!(f, "RECOVERING"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum DomainResponseItemCertificateProgressBlocker {
+    #[serde(rename = "WAIT_DNS")]
+    #[default]
+    WaitDns,
+    #[serde(rename = "WAIT_INGRESS")]
+    WaitIngress,
+    #[serde(rename = "WAIT_CA")]
+    WaitCa,
+    #[serde(rename = "COOLDOWN")]
+    Cooldown,
+    #[serde(rename = "UNKNOWN_CA")]
+    UnknownCa,
+    #[serde(rename = "OWNER_CHANGED")]
+    OwnerChanged,
+    #[serde(rename = "ERROR")]
+    Error,
+}
+impl core::fmt::Display for DomainResponseItemCertificateProgressBlocker {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::WaitDns => write!(f, "WAIT_DNS"),
+            Self::WaitIngress => write!(f, "WAIT_INGRESS"),
+            Self::WaitCa => write!(f, "WAIT_CA"),
+            Self::Cooldown => write!(f, "COOLDOWN"),
+            Self::UnknownCa => write!(f, "UNKNOWN_CA"),
+            Self::OwnerChanged => write!(f, "OWNER_CHANGED"),
+            Self::Error => write!(f, "ERROR"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct DomainResponseItemCertificateProgress {
+    #[serde(deserialize_with = "Option::deserialize", rename = "orderId")]
+    #[serialize_always]
+    pub order_id: Option<uuid::Uuid>,
+    pub phase: DomainResponseItemCertificateProgressPhase,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub blocker: Option<DomainResponseItemCertificateProgressBlocker>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "nextEligibleAt")]
+    #[serialize_always]
+    pub next_eligible_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum DomainResponseItemDnsMode {
     #[serde(rename = "EXTERNAL_DNS")]
     #[default]
@@ -20916,6 +22817,12 @@ pub struct DomainResponseItem {
     pub certificate_available: bool,
     #[serde(rename = "httpsServingReady")]
     pub https_serving_ready: bool,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "certificateProgress"
+    )]
+    #[serialize_always]
+    pub certificate_progress: Option<DomainResponseItemCertificateProgress>,
     #[serde(deserialize_with = "Option::deserialize", rename = "dnsValidatedAt")]
     #[serialize_always]
     pub dns_validated_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -21048,6 +22955,979 @@ impl DeletedResponse {
         }
         serde::Serialize::serialize(value, serializer)
     }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct DatabaseKindObject {
+    #[serde(rename = "sourceDatabaseEnvironmentId")]
+    pub source_database_environment_id: uuid::Uuid,
+    #[serde(deserialize_with = "DatabaseKindObject::deserialize_const_mode")]
+    #[serde(serialize_with = "DatabaseKindObject::serialize_const_mode")]
+    #[default("fork".to_string())]
+    pub mode: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl DatabaseKindObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_mode<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"fork\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_mode<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"fork\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct DatabaseKindObject2 {
+    #[serde(rename = "sourceDatabaseEnvironmentId")]
+    pub source_database_environment_id: uuid::Uuid,
+    #[serde(deserialize_with = "DatabaseKindObject2::deserialize_const_mode")]
+    #[serde(serialize_with = "DatabaseKindObject2::serialize_const_mode")]
+    #[default("omit".to_string())]
+    pub mode: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl DatabaseKindObject2 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_mode<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"omit\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_mode<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"omit\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct DatabaseKindObject3 {
+    #[serde(rename = "sourceDatabaseEnvironmentId")]
+    pub source_database_environment_id: uuid::Uuid,
+    #[serde(deserialize_with = "DatabaseKindObject3::deserialize_const_mode")]
+    #[serde(serialize_with = "DatabaseKindObject3::serialize_const_mode")]
+    #[default("existing".to_string())]
+    pub mode: String,
+    #[serde(rename = "targetDatabaseEnvironmentId")]
+    pub target_database_environment_id: uuid::Uuid,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl DatabaseKindObject3 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_mode<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"existing\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_mode<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"existing\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum DatabaseKind {
+    #[default]
+    Object(DatabaseKindObject),
+    Object2(DatabaseKindObject2),
+    Object3(DatabaseKindObject3),
+}
+impl DatabaseKind {
+    pub fn object(source_database_environment_id: uuid::Uuid) -> Self {
+        Self::Object(DatabaseKindObject {
+            source_database_environment_id,
+            ..Default::default()
+        })
+    }
+    pub fn object2(source_database_environment_id: uuid::Uuid) -> Self {
+        Self::Object2(DatabaseKindObject2 {
+            source_database_environment_id,
+            ..Default::default()
+        })
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Plan200ResponseParent {
+    #[serde(rename = "environmentId")]
+    pub environment_id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "sourceReleaseId")]
+    #[serialize_always]
+    pub source_release_id: Option<uuid::Uuid>,
+    pub permanent: bool,
+    pub working: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Plan200ResponseService {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    #[serde(rename = "preparationId")]
+    pub preparation_id: uuid::Uuid,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "executionSnapshotId"
+    )]
+    #[serialize_always]
+    pub execution_snapshot_id: Option<uuid::Uuid>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Plan200ResponseBinding {
+    #[serde(rename = "sourceDatabaseEnvironmentId")]
+    pub source_database_environment_id: uuid::Uuid,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "envVarName")]
+    pub env_var_name: String,
+    #[serde(rename = "autoInjectDbUrl")]
+    pub auto_inject_db_url: bool,
+    #[serde(rename = "isFunctionsDefault")]
+    pub is_functions_default: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Plan200ResponseResourceMode {
+    #[serde(rename = "fork")]
+    #[default]
+    Fork,
+    #[serde(rename = "omit")]
+    Omit,
+    #[serde(rename = "existing")]
+    Existing,
+    #[serde(rename = "undecided")]
+    Undecided,
+}
+impl core::fmt::Display for Plan200ResponseResourceMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Fork => write!(f, "fork"),
+            Self::Omit => write!(f, "omit"),
+            Self::Existing => write!(f, "existing"),
+            Self::Undecided => write!(f, "undecided"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Plan200ResponseResource {
+    #[serde(rename = "sourceDatabaseEnvironmentId")]
+    pub source_database_environment_id: uuid::Uuid,
+    #[serde(rename = "databaseId")]
+    pub database_id: uuid::Uuid,
+    #[serde(rename = "providerDatabaseId")]
+    pub provider_database_id: String,
+    #[serde(rename = "sourceProviderBranchId")]
+    pub source_provider_branch_id: String,
+    #[serde(rename = "ownerProductId")]
+    pub owner_product_id: uuid::Uuid,
+    #[serde(rename = "configuredCu")]
+    pub configured_cu: String,
+    #[serde(rename = "targetAvailable")]
+    pub target_available: bool,
+    pub mode: Plan200ResponseResourceMode,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "targetDatabaseEnvironmentId"
+    )]
+    #[serialize_always]
+    pub target_database_environment_id: Option<uuid::Uuid>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Plan200ResponseSecretStatus {
+    #[serde(rename = "APPROVED")]
+    #[default]
+    Approved,
+    #[serde(rename = "BLOCKED")]
+    Blocked,
+}
+impl core::fmt::Display for Plan200ResponseSecretStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Approved => write!(f, "APPROVED"),
+            Self::Blocked => write!(f, "BLOCKED"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Plan200ResponseSecret {
+    pub id: uuid::Uuid,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    pub key: String,
+    pub status: Plan200ResponseSecretStatus,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Plan200ResponseBlocker {
+    pub code: String,
+    pub message: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "serviceId")]
+    #[serialize_always]
+    pub service_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "resourceId")]
+    #[serialize_always]
+    pub resource_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub key: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Plan200ResponseEstimateCoverage {
+    #[serde(rename = "PARTIAL")]
+    #[default]
+    Partial,
+    #[serde(rename = "UNAVAILABLE")]
+    Unavailable,
+}
+impl core::fmt::Display for Plan200ResponseEstimateCoverage {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Partial => write!(f, "PARTIAL"),
+            Self::Unavailable => write!(f, "UNAVAILABLE"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Plan200ResponseEstimateComponent {
+    #[serde(rename = "resourceId")]
+    pub resource_id: uuid::Uuid,
+    #[serde(rename = "moduleKey")]
+    pub module_key: String,
+    #[serde(rename = "meterKey")]
+    pub meter_key: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub quantity: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub unit: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "unitPriceCents")]
+    #[serialize_always]
+    pub unit_price_cents: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "billingEnabled")]
+    #[serialize_always]
+    pub billing_enabled: Option<bool>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "pricingVersionId")]
+    #[serialize_always]
+    pub pricing_version_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "amountCents")]
+    #[serialize_always]
+    pub amount_cents: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Plan200ResponseEstimate {
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub currency: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "knownCostCents")]
+    #[serialize_always]
+    pub known_cost_cents: Option<String>,
+    pub coverage: Plan200ResponseEstimateCoverage,
+    pub components: Vec<Plan200ResponseEstimateComponent>,
+    pub assumptions: Vec<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Plan200Response {
+    #[serde(rename = "targetAvailable")]
+    pub target_available: bool,
+    pub parent: Plan200ResponseParent,
+    pub services: Vec<Plan200ResponseService>,
+    pub bindings: Vec<Plan200ResponseBinding>,
+    pub resources: Vec<Plan200ResponseResource>,
+    pub secrets: Vec<Plan200ResponseSecret>,
+    pub blockers: Vec<Plan200ResponseBlocker>,
+    #[serde(deserialize_with = "Plan200Response::deserialize_const_access")]
+    #[serde(serialize_with = "Plan200Response::serialize_const_access")]
+    #[default("restricted".to_string())]
+    pub access: String,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub estimate: Plan200ResponseEstimate,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl Plan200Response {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_access<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"restricted\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_access<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"restricted\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Usage200ResponsePeriod {
+    pub id: uuid::Uuid,
+    pub start: String,
+    pub end: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Usage200ResponseItem {
+    #[serde(rename = "resourceType")]
+    pub resource_type: String,
+    #[serde(rename = "resourceId")]
+    pub resource_id: String,
+    #[serde(rename = "moduleKey")]
+    pub module_key: String,
+    #[serde(rename = "meterKey")]
+    pub meter_key: String,
+    pub quantity: String,
+    pub unit: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "grossAmountCents")]
+    #[serialize_always]
+    pub gross_amount_cents: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Usage200Response {
+    pub coverage: Plan200ResponseEstimateCoverage,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub currency: Option<String>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "knownGrossCostCents"
+    )]
+    #[serialize_always]
+    pub known_gross_cost_cents: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub period: Option<Usage200ResponsePeriod>,
+    pub freshness: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "lastReconciledAt")]
+    #[serialize_always]
+    pub last_reconciled_at: Option<String>,
+    pub items: Vec<Usage200ResponseItem>,
+    pub limitations: Vec<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ProductFork200ResponseOperationState {
+    #[serde(rename = "PREPARING")]
+    #[default]
+    Preparing,
+    #[serde(rename = "READY")]
+    Ready,
+    #[serde(rename = "FAILED")]
+    Failed,
+    #[serde(rename = "CLEANING")]
+    Cleaning,
+    #[serde(rename = "DELETED")]
+    Deleted,
+}
+impl core::fmt::Display for ProductFork200ResponseOperationState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Preparing => write!(f, "PREPARING"),
+            Self::Ready => write!(f, "READY"),
+            Self::Failed => write!(f, "FAILED"),
+            Self::Cleaning => write!(f, "CLEANING"),
+            Self::Deleted => write!(f, "DELETED"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ProductFork200ResponseOperationCleanupReason {
+    #[serde(rename = "MANUAL")]
+    #[default]
+    Manual,
+    #[serde(rename = "EXPIRY")]
+    Expiry,
+    #[serde(rename = "GIT_CLOSE")]
+    GitClose,
+}
+impl core::fmt::Display for ProductFork200ResponseOperationCleanupReason {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Manual => write!(f, "MANUAL"),
+            Self::Expiry => write!(f, "EXPIRY"),
+            Self::GitClose => write!(f, "GIT_CLOSE"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct ProductFork200ResponseOperation {
+    pub id: uuid::Uuid,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "workspaceBindingGeneration")]
+    pub workspace_binding_generation: String,
+    #[serde(rename = "sourceEnvironmentId")]
+    pub source_environment_id: uuid::Uuid,
+    #[serde(rename = "targetEnvironmentId")]
+    pub target_environment_id: uuid::Uuid,
+    #[serde(rename = "targetWorkspaceEnvironmentId")]
+    pub target_workspace_environment_id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "sourceReleaseId")]
+    #[serialize_always]
+    pub source_release_id: Option<uuid::Uuid>,
+    #[serde(rename = "sourceServices")]
+    pub source_services: Vec<Plan200ResponseService>,
+    #[serde(rename = "sourceBindings")]
+    pub source_bindings: Vec<Plan200ResponseBinding>,
+    pub state: ProductFork200ResponseOperationState,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub retained: bool,
+    #[serde(rename = "lifecycleGeneration")]
+    pub lifecycle_generation: String,
+    #[serde(rename = "serviceGeneration")]
+    pub service_generation: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "failureStage")]
+    #[serialize_always]
+    pub failure_stage: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "cleanupReason")]
+    #[serialize_always]
+    pub cleanup_reason: Option<ProductFork200ResponseOperationCleanupReason>,
+    #[serde(rename = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "deletedAt")]
+    #[serialize_always]
+    pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct ProductFork200ResponseService {
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "sourceDeploymentId")]
+    pub source_deployment_id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "gitCommitSha")]
+    #[serialize_always]
+    pub git_commit_sha: Option<String>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "targetDeploymentId"
+    )]
+    #[serialize_always]
+    pub target_deployment_id: Option<uuid::Uuid>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "targetDeploymentStatus"
+    )]
+    #[serialize_always]
+    pub target_deployment_status: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "targetCommitSha")]
+    #[serialize_always]
+    pub target_commit_sha: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ProductFork200ResponseResourceMode {
+    #[serde(rename = "fork")]
+    #[default]
+    Fork,
+    #[serde(rename = "omit")]
+    Omit,
+    #[serde(rename = "existing")]
+    Existing,
+}
+impl core::fmt::Display for ProductFork200ResponseResourceMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Fork => write!(f, "fork"),
+            Self::Omit => write!(f, "omit"),
+            Self::Existing => write!(f, "existing"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ProductFork200ResponseResourceState {
+    #[serde(rename = "PENDING")]
+    #[default]
+    Pending,
+    #[serde(rename = "READY")]
+    Ready,
+    #[serde(rename = "CLEANED")]
+    Cleaned,
+}
+impl core::fmt::Display for ProductFork200ResponseResourceState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "PENDING"),
+            Self::Ready => write!(f, "READY"),
+            Self::Cleaned => write!(f, "CLEANED"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct ProductFork200ResponseResource {
+    pub id: uuid::Uuid,
+    #[serde(rename = "forkId")]
+    pub fork_id: uuid::Uuid,
+    #[serde(rename = "sourceDatabaseEnvironmentId")]
+    pub source_database_environment_id: uuid::Uuid,
+    #[serde(rename = "databaseId")]
+    pub database_id: uuid::Uuid,
+    #[serde(rename = "providerDatabaseId")]
+    pub provider_database_id: String,
+    #[serde(rename = "sourceProviderBranchId")]
+    pub source_provider_branch_id: String,
+    pub mode: ProductFork200ResponseResourceMode,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "targetDatabaseEnvironmentId"
+    )]
+    #[serialize_always]
+    pub target_database_environment_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "providerBranchId")]
+    #[serialize_always]
+    pub provider_branch_id: Option<String>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "providerEndpointId"
+    )]
+    #[serialize_always]
+    pub provider_endpoint_id: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "ancestorLsn")]
+    #[serialize_always]
+    pub ancestor_lsn: Option<String>,
+    pub state: ProductFork200ResponseResourceState,
+    #[serde(deserialize_with = "Option::deserialize", rename = "cleanupEvidence")]
+    #[serialize_always]
+    pub cleanup_evidence: Option<std::collections::HashMap<String, String>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct ProductFork200Response {
+    pub operation: ProductFork200ResponseOperation,
+    pub services: Vec<ProductFork200ResponseService>,
+    pub resources: Vec<ProductFork200ResponseResource>,
+    #[serde(deserialize_with = "ProductFork200Response::deserialize_const_access")]
+    #[serde(serialize_with = "ProductFork200Response::serialize_const_access")]
+    #[default("restricted".to_string())]
+    pub access: String,
+    #[serde(rename = "externalEffects")]
+    pub external_effects: String,
+    #[serde(rename = "residualCost")]
+    pub residual_cost: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl ProductFork200Response {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_access<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"restricted\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_access<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"restricted\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceKindObject {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "sourceDeploymentId")]
+    pub source_deployment_id: uuid::Uuid,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceKindObject2 {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "gitCommitSha")]
+    #[validate(
+        length(min = 7u64, max = 40u64),
+        regex(path = "REGEX_ADMIT_REQUEST_BODY2_COMMIT_SHA")
+    )]
+    pub git_commit_sha: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum ServiceKind {
+    #[default]
+    Object(ServiceKindObject),
+    Object2(ServiceKindObject2),
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum ProductForkPolicy200ResponsePolicyDatabaseMode {
+    #[serde(rename = "fork")]
+    #[default]
+    Fork,
+    #[serde(rename = "omit")]
+    Omit,
+}
+impl core::fmt::Display for ProductForkPolicy200ResponsePolicyDatabaseMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Fork => write!(f, "fork"),
+            Self::Omit => write!(f, "omit"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct ProductForkPolicy200ResponsePolicyDatabase {
+    #[serde(rename = "sourceDatabaseEnvironmentId")]
+    pub source_database_environment_id: uuid::Uuid,
+    pub mode: ProductForkPolicy200ResponsePolicyDatabaseMode,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct ProductForkPolicy200ResponsePolicy {
+    pub id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
+    pub provider: ApiErrorProviderReconnectDetailsProvider,
+    #[serde(rename = "repositoryKey")]
+    pub repository_key: String,
+    #[serde(rename = "gitUrl")]
+    pub git_url: String,
+    #[serde(rename = "actorUserId")]
+    pub actor_user_id: uuid::Uuid,
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub generation: String,
+    pub enabled: bool,
+    #[serde(rename = "parentEnvironmentId")]
+    pub parent_environment_id: uuid::Uuid,
+    #[serde(rename = "serviceIds")]
+    #[validate(length(min = 1u64, max = 256u64))]
+    pub service_ids: Vec<uuid::Uuid>,
+    #[serde(rename = "lifetimeSeconds")]
+    #[validate(range(min = 1i64, max = 9_007_199_254_740_991i64))]
+    pub lifetime_seconds: i64,
+    #[validate(length(max = 256u64))]
+    #[default(Default::default())]
+    pub databases: Vec<ProductForkPolicy200ResponsePolicyDatabase>,
+    #[serde(rename = "approvedSecretIds")]
+    #[validate(length(max = 1_024u64))]
+    #[default(Default::default())]
+    pub approved_secret_ids: Vec<uuid::Uuid>,
+    #[serde(rename = "executePullRequestCode")]
+    #[serde(
+        deserialize_with = "ProductForkPolicy200ResponsePolicy::deserialize_const_execute_pull_request_code"
+    )]
+    #[serde(
+        serialize_with = "ProductForkPolicy200ResponsePolicy::serialize_const_execute_pull_request_code"
+    )]
+    #[default(true)]
+    pub execute_pull_request_code: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl ProductForkPolicy200ResponsePolicy {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_execute_pull_request_code<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<bool, D::Error> {
+        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_execute_pull_request_code<S: serde::Serializer>(
+        value: &bool,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct ProductForkPolicy200ResponseRun {
+    #[serde(rename = "pullRequest")]
+    pub pull_request: String,
+    #[serde(rename = "forkId")]
+    pub fork_id: uuid::Uuid,
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub incarnation: String,
+    #[serde(rename = "headSha")]
+    pub head_sha: String,
+    pub state: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub retained: Option<bool>,
+    #[serde(rename = "policyGeneration")]
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub policy_generation: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct ProductForkPolicy200Response {
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    #[validate(nested)]
+    pub policy: Option<ProductForkPolicy200ResponsePolicy>,
+    #[validate(nested)]
+    pub runs: Vec<ProductForkPolicy200ResponseRun>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Environment200ResponseEnvironmentBranchMatchType {
@@ -21345,6 +24225,226 @@ pub struct Environment200Response {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct PreviewPublication200ResponseService {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "sourceRuntimeReleaseId")]
+    pub source_runtime_release_id: uuid::Uuid,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "candidatePreparationId"
+    )]
+    #[serialize_always]
+    pub candidate_preparation_id: Option<uuid::Uuid>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "baseRuntimeReleaseId"
+    )]
+    #[serialize_always]
+    pub base_runtime_release_id: Option<uuid::Uuid>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "replacedRuntimeReleaseId"
+    )]
+    #[serialize_always]
+    pub replaced_runtime_release_id: Option<uuid::Uuid>,
+    #[serde(rename = "confirmationRequired")]
+    pub confirmation_required: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct PreviewPublication200ResponseAccepted {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "runtimeReleaseId")]
+    #[serialize_always]
+    pub runtime_release_id: Option<uuid::Uuid>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct PreviewPublication200ResponsePending {
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    pub generation: String,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct PreviewPublication200ResponseObserved {
+    pub known: bool,
+    #[serde(deserialize_with = "Option::deserialize", rename = "releaseId")]
+    #[serialize_always]
+    pub release_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub members: Option<Box<T0>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct PreviewPublication200Response {
+    #[serde(rename = "environmentId")]
+    pub environment_id: uuid::Uuid,
+    #[serde(rename = "requiresTargetPreparation")]
+    pub requires_target_preparation: bool,
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub generation: String,
+    #[serde(rename = "sourceEnvironmentId")]
+    pub source_environment_id: uuid::Uuid,
+    #[serde(rename = "sourceCompositionId")]
+    pub source_composition_id: uuid::Uuid,
+    pub services: Vec<PreviewPublication200ResponseService>,
+    pub accepted: Vec<PreviewPublication200ResponseAccepted>,
+    pub pending: Vec<PreviewPublication200ResponsePending>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub observed: Option<PreviewPublication200ResponseObserved>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct PublishServiceRequestBodyConfirmation {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "candidatePreparationId")]
+    pub candidate_preparation_id: uuid::Uuid,
+    #[serde(rename = "replacedRuntimeReleaseId")]
+    pub replaced_runtime_release_id: uuid::Uuid,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct PublishService200ResponseObserved {
+    pub known: bool,
+    #[serde(deserialize_with = "Option::deserialize", rename = "releaseId")]
+    #[serialize_always]
+    pub release_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub members: Option<Box<T02>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum PublishService200ResponseStatus {
+    #[serde(rename = "PREPARING")]
+    #[default]
+    Preparing,
+    #[serde(rename = "CONFIRMATION_REQUIRED")]
+    ConfirmationRequired,
+    #[serde(rename = "ACCEPTED")]
+    Accepted,
+    #[serde(rename = "FAILED")]
+    Failed,
+}
+impl core::fmt::Display for PublishService200ResponseStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Preparing => write!(f, "PREPARING"),
+            Self::ConfirmationRequired => write!(f, "CONFIRMATION_REQUIRED"),
+            Self::Accepted => write!(f, "ACCEPTED"),
+            Self::Failed => write!(f, "FAILED"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct PublishService200ResponseActivation {
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    #[serde(rename = "desiredGeneration")]
+    pub desired_generation: String,
+    pub status: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct PublishService200ResponsePreparation {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "preparationId")]
+    #[serialize_always]
+    pub preparation_id: Option<uuid::Uuid>,
+    #[serde(rename = "deploymentStatus")]
+    pub deployment_status: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "sourceArtifactId")]
+    #[serialize_always]
+    pub source_artifact_id: Option<String>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "runtimeArtifactGraphDigest"
+    )]
+    #[serialize_always]
+    pub runtime_artifact_graph_digest: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct PublishService200Response {
+    #[serde(rename = "environmentId")]
+    pub environment_id: uuid::Uuid,
+    #[serde(rename = "requiresTargetPreparation")]
+    pub requires_target_preparation: bool,
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub generation: String,
+    #[serde(rename = "sourceEnvironmentId")]
+    pub source_environment_id: uuid::Uuid,
+    #[serde(rename = "sourceCompositionId")]
+    pub source_composition_id: uuid::Uuid,
+    pub services: Vec<PreviewPublication200ResponseService>,
+    pub accepted: Vec<PreviewPublication200ResponseAccepted>,
+    pub pending: Vec<PreviewPublication200ResponsePending>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub observed: Option<PublishService200ResponseObserved>,
+    pub status: PublishService200ResponseStatus,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub activation: Option<PublishService200ResponseActivation>,
+    #[serde(rename = "requestId")]
+    pub request_id: uuid::Uuid,
+    pub preparations: Vec<PublishService200ResponsePreparation>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Release200ResponseReleaseContentDigestAlgorithm {
     #[serde(rename = "SHA256")]
@@ -21580,7 +24680,7 @@ pub struct Serving200ResponseDesiredPendingReason {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct Serving200ResponseDesired {
-    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
     pub generation: String,
     #[serde(deserialize_with = "Option::deserialize", rename = "operationId")]
     #[serialize_always]
@@ -21618,7 +24718,7 @@ pub struct Serving200ResponseObserved {
     pub deployment_id: Option<uuid::Uuid>,
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
-    pub members: Option<Box<T0>>,
+    pub members: Option<Box<T03>>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -21652,7 +24752,7 @@ pub struct ActivateRelease202Response {
     #[serde(rename = "releaseId")]
     pub release_id: uuid::Uuid,
     #[serde(rename = "desiredGeneration")]
-    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    #[validate(regex(path = "REGEX_EXPECTED_GENERATION_REQUEST_BODY_EXPECTED_GENERATION"))]
     pub desired_generation: String,
     pub status: String,
     /// Additional properties not defined in the schema.
@@ -21919,7 +25019,7 @@ pub struct Deployment200ResponseProject {
         rename = "installCommandSource"
     )]
     #[serialize_always]
-    pub install_command_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub install_command_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(deserialize_with = "Option::deserialize", rename = "buildCommand")]
     #[serialize_always]
     pub build_command: Option<String>,
@@ -21928,7 +25028,7 @@ pub struct Deployment200ResponseProject {
         rename = "buildCommandSource"
     )]
     #[serialize_always]
-    pub build_command_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub build_command_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(deserialize_with = "Option::deserialize", rename = "outputDirectory")]
     #[serialize_always]
     pub output_directory: Option<String>,
@@ -21937,7 +25037,7 @@ pub struct Deployment200ResponseProject {
         rename = "outputDirectorySource"
     )]
     #[serialize_always]
-    pub output_directory_source: Option<ProjectRequestBodyInstallCommandSource>,
+    pub output_directory_source: Option<ServiceRequestBodyInstallCommandSource>,
     #[serde(deserialize_with = "Option::deserialize", rename = "rootDirectory")]
     #[serialize_always]
     pub root_directory: Option<String>,
@@ -22018,7 +25118,7 @@ pub struct Deployment200Response {
     pub error_code: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "errorDetails")]
     #[serialize_always]
-    pub error_details: Option<Box<T03>>,
+    pub error_details: Option<Box<T05>>,
     #[serde(deserialize_with = "Option::deserialize", rename = "detectedLanguage")]
     #[serialize_always]
     pub detected_language: Option<String>,
@@ -22030,7 +25130,7 @@ pub struct Deployment200Response {
     pub detected_port: Option<i64>,
     #[serde(deserialize_with = "Option::deserialize", rename = "detectorMetadata")]
     #[serialize_always]
-    pub detector_metadata: Option<Box<T03>>,
+    pub detector_metadata: Option<Box<T05>>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "detectorConfidence"
@@ -22039,7 +25139,7 @@ pub struct Deployment200Response {
     pub detector_confidence: Option<f64>,
     #[serde(deserialize_with = "Option::deserialize", rename = "ssrAnalysisResult")]
     #[serialize_always]
-    pub ssr_analysis_result: Option<Box<T03>>,
+    pub ssr_analysis_result: Option<Box<T05>>,
     #[serde(deserialize_with = "Option::deserialize", rename = "artifactSizeBytes")]
     #[serialize_always]
     pub artifact_size_bytes: Option<f64>,
@@ -22176,7 +25276,7 @@ pub struct Deployment200Response {
     pub isr_cache_prefix: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
-    pub meta: Option<Box<T03>>,
+    pub meta: Option<Box<T05>>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "previewScreenshotUrl"
@@ -22894,6 +25994,12 @@ pub struct Domain200ResponseHostname {
     pub certificate_available: bool,
     #[serde(rename = "httpsServingReady")]
     pub https_serving_ready: bool,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "certificateProgress"
+    )]
+    #[serialize_always]
+    pub certificate_progress: Option<DomainResponseItemCertificateProgress>,
     #[serde(deserialize_with = "Option::deserialize", rename = "dnsError")]
     #[serialize_always]
     pub dns_error: Option<String>,
@@ -24634,25 +27740,6 @@ pub struct Database200ResponseComputeShape {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum Database200ResponsePlan {
-    #[serde(rename = "HOBBY")]
-    #[default]
-    Hobby,
-    #[serde(rename = "PRO")]
-    Pro,
-    #[serde(rename = "ENTERPRISE")]
-    Enterprise,
-}
-impl core::fmt::Display for Database200ResponsePlan {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Hobby => write!(f, "HOBBY"),
-            Self::Pro => write!(f, "PRO"),
-            Self::Enterprise => write!(f, "ENTERPRISE"),
-        }
-    }
-}
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
@@ -25646,6 +28733,8 @@ pub struct Database200ResponseDatum {
     )]
     #[serialize_always]
     pub suspend_timeout_seconds: Option<i64>,
+    #[serde(rename = "suspendTimeoutUnavailable")]
+    pub suspend_timeout_unavailable: Option<bool>,
     #[serde(deserialize_with = "Option::deserialize", rename = "endpointStatus")]
     #[serialize_always]
     pub endpoint_status: Option<Database200ResponseDatumEndpointStatus>,
@@ -25673,6 +28762,14 @@ pub struct Database200ResponseDatum {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct Database200Response {
+    /// Validation: Must be a multiple of 0.25
+    #[serde(rename = "computeMaxCu")]
+    #[validate(range(min = 0.25, max = 8.0))]
+    pub compute_max_cu: f64,
+    /// Validation: Must be a multiple of 0.25
+    #[serde(rename = "autoscaleLimitCu")]
+    #[validate(range(min = 0.0, max = 8.0))]
+    pub autoscale_limit_cu: f64,
     #[serde(rename = "allowedCuSizes")]
     pub allowed_cu_sizes: Vec<Database200ResponseAllowedCuSize>,
     #[serde(rename = "autoscaleCuSizes")]
@@ -25683,15 +28780,22 @@ pub struct Database200Response {
     #[serde(rename = "computeShapes")]
     #[validate(nested)]
     pub compute_shapes: Vec<Database200ResponseComputeShape>,
-    #[serde(rename = "defaultPgVersion")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub default_pg_version: i64,
-    pub plan: Database200ResponsePlan,
+    #[serde(deserialize_with = "Option::deserialize", rename = "defaultPgVersion")]
+    #[serialize_always]
+    pub default_pg_version: Option<i64>,
+    pub plan: Deployment200ResponseRequestedBuildTier,
     #[serde(rename = "supportedPgVersions")]
     pub supported_pg_versions: Vec<i64>,
-    #[serde(rename = "suspendTimeoutCapability")]
+    #[serde(rename = "capabilitiesUnavailable")]
+    #[default(false)]
+    pub capabilities_unavailable: bool,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "suspendTimeoutCapability"
+    )]
+    #[serialize_always]
     #[validate(nested)]
-    pub suspend_timeout_capability: Database200ResponseSuspendTimeoutCapability,
+    pub suspend_timeout_capability: Option<Database200ResponseSuspendTimeoutCapability>,
     #[serde(rename = "capacityClasses")]
     pub capacity_classes: Vec<Database200ResponseCapacityClass>,
     #[serde(
@@ -25776,91 +28880,6 @@ pub struct Database200Response2 {
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum Database200Response3Permission {
-    #[serde(rename = "deployments.read")]
-    #[default]
-    DeploymentsRead,
-    #[serde(rename = "deployments.write")]
-    DeploymentsWrite,
-    #[serde(rename = "projects.read")]
-    ProjectsRead,
-    #[serde(rename = "projects.write")]
-    ProjectsWrite,
-    #[serde(rename = "projects.admin")]
-    ProjectsAdmin,
-    #[serde(rename = "env.read")]
-    EnvRead,
-    #[serde(rename = "env.write")]
-    EnvWrite,
-    #[serde(rename = "env.materialize")]
-    EnvMaterialize,
-    #[serde(rename = "domains.read")]
-    DomainsRead,
-    #[serde(rename = "domains.write")]
-    DomainsWrite,
-    #[serde(rename = "kv.read")]
-    KvRead,
-    #[serde(rename = "kv.write")]
-    KvWrite,
-    #[serde(rename = "kaiki.databases.read")]
-    KaikiDatabasesRead,
-    #[serde(rename = "kaiki.databases.write")]
-    KaikiDatabasesWrite,
-    #[serde(rename = "kaiki.branches.read")]
-    KaikiBranchesRead,
-    #[serde(rename = "kaiki.branches.write")]
-    KaikiBranchesWrite,
-    #[serde(rename = "kaiki.integrations.read")]
-    KaikiIntegrationsRead,
-    #[serde(rename = "kaiki.integrations.write")]
-    KaikiIntegrationsWrite,
-    #[serde(rename = "team.read")]
-    TeamRead,
-    #[serde(rename = "team.write")]
-    TeamWrite,
-    #[serde(rename = "billing.read")]
-    BillingRead,
-    #[serde(rename = "billing.write")]
-    BillingWrite,
-    #[serde(rename = "billing.admin")]
-    BillingAdmin,
-    #[serde(rename = "workspace.admin")]
-    WorkspaceAdmin,
-    #[serde(rename = "workspace.audit.read")]
-    WorkspaceAuditRead,
-}
-impl core::fmt::Display for Database200Response3Permission {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::DeploymentsRead => write!(f, "deployments.read"),
-            Self::DeploymentsWrite => write!(f, "deployments.write"),
-            Self::ProjectsRead => write!(f, "projects.read"),
-            Self::ProjectsWrite => write!(f, "projects.write"),
-            Self::ProjectsAdmin => write!(f, "projects.admin"),
-            Self::EnvRead => write!(f, "env.read"),
-            Self::EnvWrite => write!(f, "env.write"),
-            Self::EnvMaterialize => write!(f, "env.materialize"),
-            Self::DomainsRead => write!(f, "domains.read"),
-            Self::DomainsWrite => write!(f, "domains.write"),
-            Self::KvRead => write!(f, "kv.read"),
-            Self::KvWrite => write!(f, "kv.write"),
-            Self::KaikiDatabasesRead => write!(f, "kaiki.databases.read"),
-            Self::KaikiDatabasesWrite => write!(f, "kaiki.databases.write"),
-            Self::KaikiBranchesRead => write!(f, "kaiki.branches.read"),
-            Self::KaikiBranchesWrite => write!(f, "kaiki.branches.write"),
-            Self::KaikiIntegrationsRead => write!(f, "kaiki.integrations.read"),
-            Self::KaikiIntegrationsWrite => write!(f, "kaiki.integrations.write"),
-            Self::TeamRead => write!(f, "team.read"),
-            Self::TeamWrite => write!(f, "team.write"),
-            Self::BillingRead => write!(f, "billing.read"),
-            Self::BillingWrite => write!(f, "billing.write"),
-            Self::BillingAdmin => write!(f, "billing.admin"),
-            Self::WorkspaceAdmin => write!(f, "workspace.admin"),
-            Self::WorkspaceAuditRead => write!(f, "workspace.audit.read"),
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Database200Response3KaikiStatus {
     #[serde(rename = "creating")]
     #[default]
@@ -25941,7 +28960,7 @@ pub struct Database200Response3 {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "projectAttachments")]
     pub project_attachments: Vec<Database200ResponseDatumProjectAttachment>,
-    pub permissions: Vec<Database200Response3Permission>,
+    pub permissions: Vec<String>,
     #[serde(rename = "kaikiStatus")]
     pub kaiki_status: Option<Database200Response3KaikiStatus>,
     #[serde(
@@ -25950,6 +28969,19 @@ pub struct Database200Response3 {
     )]
     #[serialize_always]
     pub suspend_timeout_seconds: Option<i64>,
+    #[serde(rename = "suspendTimeoutUnavailable")]
+    pub suspend_timeout_unavailable: Option<bool>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    #[validate(nested)]
+    pub capacity: Option<Option<Database200ResponseDatumRuntimeCapacity>>,
+    /// Validation: Must be a multiple of 0.25
+    #[serde(rename = "computeMaxCu")]
+    #[validate(range(min = 0.25, max = 8.0))]
+    pub compute_max_cu: f64,
+    /// Validation: Must be a multiple of 0.25
+    #[serde(rename = "autoscaleLimitCu")]
+    #[validate(range(min = 0.0, max = 8.0))]
+    pub autoscale_limit_cu: f64,
     #[serde(rename = "allowedCuSizes")]
     pub allowed_cu_sizes: Vec<Database200ResponseAllowedCuSize>,
     #[serde(rename = "autoscaleCuSizes")]
@@ -25957,15 +28989,22 @@ pub struct Database200Response3 {
     #[serde(rename = "computeShapes")]
     #[validate(nested)]
     pub compute_shapes: Vec<Database200ResponseComputeShape>,
-    #[serde(rename = "defaultPgVersion")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub default_pg_version: i64,
-    pub plan: Database200ResponsePlan,
+    #[serde(deserialize_with = "Option::deserialize", rename = "defaultPgVersion")]
+    #[serialize_always]
+    pub default_pg_version: Option<i64>,
+    pub plan: Deployment200ResponseRequestedBuildTier,
     #[serde(rename = "supportedPgVersions")]
     pub supported_pg_versions: Vec<i64>,
-    #[serde(rename = "suspendTimeoutCapability")]
+    #[serde(rename = "capabilitiesUnavailable")]
+    #[default(false)]
+    pub capabilities_unavailable: bool,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "suspendTimeoutCapability"
+    )]
+    #[serialize_always]
     #[validate(nested)]
-    pub suspend_timeout_capability: Database200ResponseSuspendTimeoutCapability,
+    pub suspend_timeout_capability: Option<Database200ResponseSuspendTimeoutCapability>,
     #[serde(rename = "capacityClasses")]
     pub capacity_classes: Vec<Database200ResponseCapacityClass>,
     #[serde(
@@ -26324,8 +29363,6 @@ pub enum Workspace200ResponseSubscriptionCurrentPeriodSettlementMode {
     CutoverOpening,
     #[serde(rename = "NOT_REQUIRED")]
     NotRequired,
-    #[serde(rename = "ENTERPRISE_BALANCE")]
-    EnterpriseBalance,
 }
 impl core::fmt::Display for Workspace200ResponseSubscriptionCurrentPeriodSettlementMode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -26337,7 +29374,6 @@ impl core::fmt::Display for Workspace200ResponseSubscriptionCurrentPeriodSettlem
             Self::AdminWaived => write!(f, "ADMIN_WAIVED"),
             Self::CutoverOpening => write!(f, "CUTOVER_OPENING"),
             Self::NotRequired => write!(f, "NOT_REQUIRED"),
-            Self::EnterpriseBalance => write!(f, "ENTERPRISE_BALANCE"),
         }
     }
 }
@@ -26345,7 +29381,7 @@ impl core::fmt::Display for Workspace200ResponseSubscriptionCurrentPeriodSettlem
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct Workspace200ResponseSubscription {
     #[serde(rename = "planSlug")]
-    pub plan_slug: Database200ResponsePlan,
+    pub plan_slug: Deployment200ResponseRequestedBuildTier,
     pub status: Workspace200ResponseSubscriptionStatus,
     #[serde(
         deserialize_with = "Option::deserialize",
@@ -27064,7 +30100,7 @@ pub struct Status200Response {
     pub error_code: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "errorDetails")]
     #[serialize_always]
-    pub error_details: Option<Box<T09>>,
+    pub error_details: Option<Box<T011>>,
     #[serde(default, with = "serde_with::rust::double_option")]
     pub admission: Option<Option<Status200ResponseAdmission>>,
     #[serde(
@@ -27798,9 +30834,9 @@ pub struct AdmitSetRequestBodySelection {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
-pub struct ServiceKindObject {
-    #[serde(deserialize_with = "ServiceKindObject::deserialize_const_mode")]
-    #[serde(serialize_with = "ServiceKindObject::serialize_const_mode")]
+pub struct ServiceKind2Object {
+    #[serde(deserialize_with = "ServiceKind2Object::deserialize_const_mode")]
+    #[serde(serialize_with = "ServiceKind2Object::serialize_const_mode")]
     #[default("LOCAL".to_string())]
     pub mode: String,
     #[serde(rename = "serviceId")]
@@ -27820,7 +30856,7 @@ pub struct ServiceKindObject {
     #[validate(nested)]
     pub expected_context: AdmitRequestBody2ExpectedContext,
 }
-impl ServiceKindObject {
+impl ServiceKind2Object {
     #[allow(
         clippy::float_cmp,
         reason = "JSON Schema constants require exact equality"
@@ -27866,9 +30902,9 @@ impl ServiceKindObject {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
-pub struct ServiceKindObject2 {
-    #[serde(deserialize_with = "ServiceKindObject2::deserialize_const_mode")]
-    #[serde(serialize_with = "ServiceKindObject2::serialize_const_mode")]
+pub struct ServiceKind2Object2 {
+    #[serde(deserialize_with = "ServiceKind2Object2::deserialize_const_mode")]
+    #[serde(serialize_with = "ServiceKind2Object2::serialize_const_mode")]
     #[default("REMOTE".to_string())]
     pub mode: String,
     #[serde(rename = "serviceId")]
@@ -27885,7 +30921,7 @@ pub struct ServiceKindObject2 {
     )]
     pub commit_sha: Option<String>,
 }
-impl ServiceKindObject2 {
+impl ServiceKind2Object2 {
     #[allow(
         clippy::float_cmp,
         reason = "JSON Schema constants require exact equality"
@@ -27928,14 +30964,14 @@ impl ServiceKindObject2 {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(untagged)]
-pub enum ServiceKind {
+pub enum ServiceKind2 {
     #[default]
-    Object(ServiceKindObject),
-    Object2(ServiceKindObject2),
+    Object(ServiceKind2Object),
+    Object2(ServiceKind2Object2),
 }
-impl ServiceKind {
+impl ServiceKind2 {
     pub fn object2(service_id: uuid::Uuid) -> Self {
-        Self::Object2(ServiceKindObject2 {
+        Self::Object2(ServiceKind2Object2 {
             service_id,
             ..Default::default()
         })
@@ -28599,7 +31635,7 @@ pub struct RunnerContext200ResponseSettings {
     #[serde(rename = "gitLfsEnabled")]
     pub git_lfs_enabled: bool,
     #[serde(rename = "packageManager")]
-    pub package_manager: ProjectRequestBodyPackageManager,
+    pub package_manager: ServiceRequestBodyPackageManager,
     #[serde(rename = "nodeVersion")]
     #[validate(
         length(min = 1u64, max = 128u64),
@@ -28740,7 +31776,7 @@ pub struct FailBeforeSourceRequestBodyDiagnostic {
     #[validate(length(min = 1u64, max = 4_096u64))]
     pub message: String,
     /// Structured error details. Shape depends on the error code.
-    pub details: Option<std::collections::HashMap<String, Box<T010>>>,
+    pub details: Option<std::collections::HashMap<String, Box<T012>>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct FailBeforeSource200Response {

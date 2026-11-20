@@ -20,6 +20,10 @@ pub enum DomainsCommand {
         /// Domain name (e.g. example.com)
         domain: String,
 
+        /// Target Service (required for a multi-Service Product)
+        #[arg(long)]
+        service_id: Option<String>,
+
         /// Target environment (name or ID)
         #[arg(long)]
         environment: Option<String>,

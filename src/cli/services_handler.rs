@@ -39,12 +39,48 @@ pub async fn run(
                     serde_json::to_value(source)?
                 }
                 ServicesCommand::Create(configuration) => {
-                    configure(&client, configuration, None).await?
+                    let settings = super::projects_handler::user_build_settings(
+                        configuration.build.install_command,
+                        configuration.build.build_command,
+                        configuration.build.output_directory,
+                    );
+                    let base = configuration.configuration;
+                    let body = ServiceRequestBody {
+                        name: base.name,
+                        source_id: base.source_id,
+                        source_ref: base.source_ref,
+                        root_directory: base.root_directory,
+                        framework_preset: configuration.framework,
+                        package_manager: configuration
+                            .build
+                            .package_manager
+                            .map(|manager| {
+                                serde_json::from_value(serde_json::json!(manager.to_uppercase()))
+                            })
+                            .transpose()?,
+                        install_command: settings.install_command,
+                        install_command_source: settings.install_command_source,
+                        build_command: settings.build_command,
+                        build_command_source: settings.build_command_source,
+                        output_directory: settings.output_directory,
+                        output_directory_source: settings.output_directory_source,
+                        ..Default::default()
+                    };
+                    configure(&client, base.project_id, None, body).await?
                 }
                 ServicesCommand::Update {
                     service_id,
                     configuration,
-                } => configure(&client, configuration, Some(service_id)).await?,
+                } => {
+                    let body = ServiceRequestBody {
+                        name: configuration.name,
+                        source_id: configuration.source_id,
+                        source_ref: configuration.source_ref,
+                        root_directory: configuration.root_directory,
+                        ..Default::default()
+                    };
+                    configure(&client, configuration.project_id, Some(service_id), body).await?
+                }
                 ServicesCommand::Delete { .. } => unreachable!(),
             };
             if json {
@@ -59,17 +95,12 @@ pub async fn run(
 
 async fn configure(
     client: &ApiClient,
-    configuration: super::services::ServiceConfiguration,
+    project_id: uuid::Uuid,
     service_id: Option<uuid::Uuid>,
+    body: ServiceRequestBody,
 ) -> anyhow::Result<serde_json::Value> {
-    let body = ServiceRequestBody {
-        name: configuration.name,
-        source_id: configuration.source_id,
-        source_ref: configuration.source_ref,
-        root_directory: configuration.root_directory,
-    };
     let result = client
-        .configure_service(configuration.project_id, service_id, body.clone())
+        .configure_service(project_id, service_id, body.clone())
         .await?;
     anyhow::ensure!(
         service_id.is_none_or(|id| id == result.service_id)

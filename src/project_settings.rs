@@ -15,9 +15,10 @@ pub(crate) enum ProjectSettingsFetch {
 pub(crate) async fn fetch(
     client: &ApiClient,
     project_id: &str,
+    service_id: Option<uuid::Uuid>,
 ) -> anyhow::Result<ProjectBuildSettings> {
     let project = client
-        .project(project_id)
+        .project_for_service(project_id, service_id)
         .await
         .context("failed to fetch project settings")?;
     if project.application.is_none() {
@@ -60,8 +61,9 @@ pub(crate) async fn fetch(
 pub(crate) async fn fetch_for_effective_config(
     client: &ApiClient,
     project_id: &str,
+    service_id: Option<uuid::Uuid>,
 ) -> anyhow::Result<ProjectSettingsFetch> {
-    match fetch(client, project_id).await {
+    match fetch(client, project_id, service_id).await {
         Ok(settings) => Ok(ProjectSettingsFetch::Applied(Box::new(settings))),
         Err(error) if crate::api::classify_api_retry(&error).is_some() => {
             Ok(ProjectSettingsFetch::TransientFailure {
@@ -75,10 +77,10 @@ pub(crate) async fn fetch_for_effective_config(
 }
 
 fn setting_source(
-    value: nrz_api::ProjectRequestBodyInstallCommandSource,
+    value: nrz_api::ServiceRequestBodyInstallCommandSource,
 ) -> nrz::config::BuildSettingSource {
     use nrz::config::BuildSettingSource;
-    use nrz_api::ProjectRequestBodyInstallCommandSource as ApiSource;
+    use nrz_api::ServiceRequestBodyInstallCommandSource as ApiSource;
     match value {
         ApiSource::Preset => BuildSettingSource::Preset,
         ApiSource::Detected => BuildSettingSource::Detected,

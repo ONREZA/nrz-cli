@@ -448,10 +448,22 @@ fn compute_config_body(health_check_path: Option<String>) -> nrz_api::ComputeCon
 async fn sync_compute_config(
     client: &ApiClient,
     project_id: &str,
+    service_id: &str,
     health_check: &ResolvedHealthCheck,
     json: bool,
 ) {
-    let body = compute_config_body(health_check.path.clone());
+    let mut body = compute_config_body(health_check.path.clone());
+    match service_id.parse() {
+        Ok(id) => body.service_id = Some(id),
+        Err(error) => {
+            output::warn(
+                json,
+                format!("failed to sync compute config: invalid Service ID: {error}"),
+                output::Phase::Deploy,
+            );
+            return;
+        }
+    }
     let resp = client.update_compute_config(project_id, body).await;
     if let Err(e) = resp {
         output::warn(

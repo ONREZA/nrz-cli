@@ -286,7 +286,7 @@ fn info_preserves_the_cli_projection_of_project_details() {
         branch: Some("main".into()),
         root_directory: Some("apps/web".into()),
         node_version: Some("NODE_24".into()),
-        package_manager: Some(nrz_api::ProjectRequestBodyPackageManager::Bun),
+        package_manager: Some(nrz_api::ServiceRequestBodyPackageManager::Bun),
         created_at: TIMESTAMP.parse().unwrap(),
         updated_at: TIMESTAMP.parse().unwrap(),
         ..Default::default()

@@ -203,6 +203,7 @@ fn invoke_args() -> FunctionsInvokeArgs {
         name: "api".to_string(),
         dir: ".".to_string(),
         project_id: None,
+        service_id: None,
         environment: None,
         method: None,
         path: None,

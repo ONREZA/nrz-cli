@@ -56,6 +56,10 @@ pub struct FunctionsInvokeArgs {
     #[arg(long)]
     pub project_id: Option<String>,
 
+    /// Target Service (required for a multi-Service Product)
+    #[arg(long)]
+    pub service_id: Option<String>,
+
     /// Target environment (production, preview, development, custom name, or environment ID)
     #[arg(long)]
     pub environment: Option<String>,

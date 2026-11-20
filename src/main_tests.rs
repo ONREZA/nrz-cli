@@ -91,3 +91,48 @@ fn selected_deployment_requires_one_selection_and_accepts_independent_checkouts(
     assert!(args.all);
     assert!(args.service_ids.is_empty());
 }
+
+#[test]
+fn publication_requires_a_target_selected_services_and_an_explicit_retry_key() {
+    let target = uuid::Uuid::now_v7().to_string();
+    let source = uuid::Uuid::now_v7().to_string();
+    let release = uuid::Uuid::now_v7().to_string();
+    let service = uuid::Uuid::now_v7().to_string();
+    let mut args = vec![
+        "nrz",
+        "publish",
+        "--target-environment",
+        &target,
+        "--source-environment",
+        &source,
+        "--source-composition",
+        &release,
+    ];
+    assert!(Cli::try_parse_from(args.clone()).is_err());
+    args.extend(["--service", &service]);
+    assert!(Cli::try_parse_from(args.clone()).is_err());
+    args.push("--preview");
+    assert!(Cli::try_parse_from(args.clone()).is_ok());
+    args.pop();
+    args.extend(["--idempotency-key", &release]);
+    assert!(Cli::try_parse_from(args).is_ok());
+}
+
+#[test]
+fn fork_cleanup_is_addressed_to_one_product_and_one_copy() {
+    let product = uuid::Uuid::now_v7().to_string();
+    let fork = uuid::Uuid::now_v7().to_string();
+    assert!(Cli::try_parse_from(["nrz", "fork", "delete", &fork, "--force"]).is_err());
+    assert!(
+        Cli::try_parse_from([
+            "nrz",
+            "fork",
+            "--product-id",
+            &product,
+            "delete",
+            &fork,
+            "--force"
+        ])
+        .is_ok()
+    );
+}

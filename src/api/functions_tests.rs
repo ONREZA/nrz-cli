@@ -1,23 +1,26 @@
 use crate::test_support::serve_api;
 use axum::{
     Json, Router,
-    extract::Path,
+    extract::{Path, Query},
     routing::{get, post},
 };
 use serde_json::{Value, json};
+use std::collections::HashMap;
 
 const PROJECT: &str = "00000000-0000-0000-0000-000000000001";
 const ENVIRONMENT: &str = "00000000-0000-0000-0000-000000000002";
 const FUNCTION: &str = "00000000-0000-0000-0000-000000000003";
 const REVISION: &str = "00000000-0000-0000-0000-000000000004";
+const SERVICE: &str = "00000000-0000-0000-0000-000000000006";
 const RULES_DEPLOYMENT: &str = "00000000-0000-0000-0000-000000000005";
 
 #[tokio::test]
 async fn functions_and_rules_use_typed_requests_and_responses() {
     let prefix = "/v1/projects/{id}/function-activations/environments/{environment_id}";
     let app = Router::new()
-        .route(&format!("{prefix}/functions"), get(|Path((project, environment)): Path<(String, String)>| async move {
+        .route(&format!("{prefix}/functions"), get(|Path((project, environment)): Path<(String, String)>, Query(query): Query<HashMap<String, String>>| async move {
             assert_eq!((project.as_str(), environment.as_str()), (PROJECT, ENVIRONMENT));
+            assert_eq!(query.get("serviceId").map(String::as_str), Some(SERVICE));
             Json(json!({"functions":[],"publishAttempts":[]}))
         }))
         .route(&format!("{prefix}/functions/{{function_id}}/revisions/{{revision_id}}/test-invoke"), post(
@@ -41,7 +44,7 @@ async fn functions_and_rules_use_typed_requests_and_responses() {
     let (client, server) = serve_api(app).await;
     assert!(
         client
-            .functions(PROJECT, ENVIRONMENT)
+            .functions(PROJECT, ENVIRONMENT, Some(SERVICE))
             .await
             .unwrap()
             .functions

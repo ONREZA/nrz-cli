@@ -19,12 +19,20 @@ impl ApiClient {
     }
 
     pub async fn project(&self, id: &str) -> anyhow::Result<Project200Response3> {
+        self.project_for_service(id, None).await
+    }
+    pub async fn project_for_service(
+        &self,
+        id: &str,
+        service_id: Option<uuid::Uuid>,
+    ) -> anyhow::Result<Project200Response3> {
         let response = self
             .platform()?
             .get_v1projects_by_id(GetV1projectsByIdRequest {
                 path: GetV1projectsByIdRequestPath {
                     id: id.parse().context("invalid project ID")?,
                 },
+                query: GetV1projectsByIdRequestQuery { service_id },
             })
             .await?;
         api_success!(

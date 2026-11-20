@@ -5,7 +5,7 @@ use crate::auth;
 use crate::output;
 use nrz::config;
 
-use super::projects::{ProjectsArgs, ProjectsCommand};
+use super::projects::{ProjectBuildOptions, ProjectsArgs, ProjectsCommand};
 
 mod models;
 use models::*;
@@ -27,9 +27,13 @@ pub async fn run(
             git_url,
             branch,
             framework,
-            install_command,
-            build_command,
-            output_directory,
+            build:
+                ProjectBuildOptions {
+                    package_manager,
+                    install_command,
+                    build_command,
+                    output_directory,
+                },
             link,
         } => {
             create(
@@ -40,6 +44,7 @@ pub async fn run(
                 git_url,
                 branch,
                 framework,
+                package_manager,
                 install_command,
                 build_command,
                 output_directory,
@@ -47,27 +52,34 @@ pub async fn run(
             )
             .await
         }
-        ProjectsCommand::Info { id } => info(&client, &id, json).await,
+        ProjectsCommand::Info { id, service_id } => info(&client, &id, service_id, json).await,
         ProjectsCommand::Update {
             id,
+            service_id,
             display_name,
             git_url,
             branch,
             framework,
-            install_command,
-            build_command,
-            output_directory,
+            build:
+                ProjectBuildOptions {
+                    package_manager,
+                    install_command,
+                    build_command,
+                    output_directory,
+                },
             root_directory,
             node_version,
         } => {
             update(
                 &client,
                 &id,
+                service_id,
                 json,
                 display_name,
                 git_url,
                 branch,
                 framework,
+                package_manager,
                 install_command,
                 build_command,
                 output_directory,
@@ -127,15 +139,15 @@ pub(super) fn user_build_settings(
     nrz_api::ProjectRequestBody {
         install_command_source: install_command
             .as_ref()
-            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+            .map(|_| nrz_api::ServiceRequestBodyInstallCommandSource::User),
         install_command: install_command.map(Some),
         build_command_source: build_command
             .as_ref()
-            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+            .map(|_| nrz_api::ServiceRequestBodyInstallCommandSource::User),
         build_command: build_command.map(Some),
         output_directory_source: output_directory
             .as_ref()
-            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+            .map(|_| nrz_api::ServiceRequestBodyInstallCommandSource::User),
         output_directory,
         ..Default::default()
     }
@@ -150,6 +162,7 @@ async fn create(
     git_url: Option<String>,
     branch: Option<String>,
     framework: Option<String>,
+    package_manager: Option<String>,
     install_command: Option<String>,
     build_command: Option<String>,
     output_directory: Option<String>,
@@ -161,6 +174,10 @@ async fn create(
         git_url,
         branch,
         framework_preset: framework,
+        package_manager: package_manager
+            .map(|value| serde_json::from_value(serde_json::json!(value.to_uppercase())))
+            .transpose()
+            .context("invalid package manager")?,
         ..user_build_settings(install_command, build_command, output_directory)
     };
 
@@ -208,9 +225,14 @@ async fn create(
     Ok(())
 }
 
-async fn info(client: &ApiClient, id: &str, json: bool) -> anyhow::Result<()> {
+async fn info(
+    client: &ApiClient,
+    id: &str,
+    service_id: Option<uuid::Uuid>,
+    json: bool,
+) -> anyhow::Result<()> {
     let mut resp: ProjectDetailResponse = client
-        .project(id)
+        .project_for_service(id, service_id)
         .await
         .with_context(|| format!("failed to fetch project {id}"))?
         .into();
@@ -319,11 +341,13 @@ async fn info(client: &ApiClient, id: &str, json: bool) -> anyhow::Result<()> {
 async fn update(
     client: &ApiClient,
     id: &str,
+    service_id: Option<uuid::Uuid>,
     json: bool,
     display_name: Option<String>,
     git_url: Option<String>,
     branch: Option<String>,
     framework: Option<String>,
+    package_manager: Option<String>,
     install_command: Option<String>,
     build_command: Option<String>,
     output_directory: Option<String>,
@@ -335,6 +359,7 @@ async fn update(
         &git_url,
         &branch,
         &framework,
+        &package_manager,
         &install_command,
         &build_command,
         &output_directory,
@@ -348,10 +373,15 @@ async fn update(
     }
     let settings = user_build_settings(install_command, build_command, output_directory);
     let body = nrz_api::ProjectRequestBody2 {
+        service_id,
         display_name,
         git_url: git_url.map(Some),
         branch,
         framework_preset: framework,
+        package_manager: package_manager
+            .map(|value| serde_json::from_value(serde_json::json!(value.to_uppercase())))
+            .transpose()
+            .context("invalid package manager")?,
         install_command_source: settings.install_command_source,
         install_command: settings.install_command,
         build_command_source: settings.build_command_source,

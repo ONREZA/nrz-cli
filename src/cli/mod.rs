@@ -25,6 +25,7 @@ pub mod kv_handler;
 pub mod kv_v2;
 pub mod kv_v2_handler;
 pub mod preview;
+pub mod product_copy;
 pub mod projects;
 pub mod projects_handler;
 #[cfg(test)]
@@ -139,6 +140,12 @@ pub enum Command {
 
     /// Manage Product Services
     Services(ServicesArgs),
+
+    /// Manage disposable copies of a running Product
+    Fork(product_copy::ForkArgs),
+
+    /// Publish tested Services to a target ProductEnvironment
+    Publish(product_copy::PublishArgs),
 
     /// Manage Compute endpoint policies, exposure and sharing
     Endpoints(EndpointsArgs),

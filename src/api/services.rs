@@ -75,7 +75,12 @@ impl ApiClient {
                             id: product_id,
                             service_id,
                         },
-                        body,
+                        body: ServiceRequestBody2 {
+                            name: body.name,
+                            source_id: body.source_id,
+                            source_ref: body.source_ref,
+                            root_directory: body.root_directory,
+                        },
                     },
                 )
                 .await?;

@@ -169,7 +169,7 @@ fn project(id: String) -> nrz_api::Project200Response3 {
             ..Default::default()
         }),
         node_version: Some("NODE_22".into()),
-        package_manager: Some(nrz_api::ProjectRequestBodyPackageManager::Npm),
+        package_manager: Some(nrz_api::ServiceRequestBodyPackageManager::Npm),
         root_directory: Some(".".into()),
         git_lfs_enabled: Some(false),
         ignored_build_behavior: Some(nrz_api::Project200Response3IgnoredBuildBehavior::Automatic),

@@ -46,7 +46,7 @@ async fn only_retryable_settings_failures_allow_fallback() {
         let client =
             ApiClient::with_http_client(format!("http://{address}"), reqwest::Client::new())
                 .unwrap();
-        let result = fetch_for_effective_config(&client, project).await;
+        let result = fetch_for_effective_config(&client, project, None).await;
         if transient {
             assert!(matches!(
                 result,

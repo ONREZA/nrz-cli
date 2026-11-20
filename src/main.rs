@@ -108,7 +108,10 @@ async fn main() {
 }
 
 fn load_initial_config(command: &Command) -> anyhow::Result<ProjectConfig> {
-    if matches!(command, Command::DeploySet(_)) {
+    if matches!(
+        command,
+        Command::DeploySet(_) | Command::Fork(_) | Command::Publish(_)
+    ) {
         return Ok(ProjectConfig::default());
     }
     if matches!(
@@ -213,6 +216,8 @@ async fn run_command(
         Command::Upgrade(args) => upgrade::run(args, json).await,
         Command::Projects(args) => cli::projects_handler::run(args, json, token, workspace).await,
         Command::Endpoints(args) => cli::endpoints_handler::run(args, json, token, workspace).await,
+        Command::Fork(args) => cli::product_copy::fork(args, json, token, workspace).await,
+        Command::Publish(args) => cli::product_copy::publish(args, json, token, workspace).await,
         Command::Services(args) => cli::services_handler::run(args, json, token, workspace).await,
         Command::Preview(args) => preview::run(args, json, token, workspace, config).await,
         Command::Config(args) => {
