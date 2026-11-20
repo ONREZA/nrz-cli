@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.51.1] - 2026-11-20
+
+### 🐛 Bug Fixes
+
+- **cli:** include fork service urls ([745d537](https://github.com/ONREZA/nrz-cli/commit/745d537ddc60fb9a5dfcd493c198565b9b19386d))
+
 ## [0.51.0] - 2026-11-20
 
 ### ✨ Features
