@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.52.2] - 2026-11-21
+
+### 🔧 Changed
+
+- **deps:** pin updated functions runtime ([b894364](https://github.com/ONREZA/nrz-cli/commit/b89436408396163a7273ff63ff98e785ce6b82aa))
+
 ## [0.52.1] - 2026-11-21
 
 ### 🔧 Changed
