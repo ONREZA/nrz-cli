@@ -10,22 +10,31 @@ use bao_tree::{
 use bytes::Bytes;
 use iroh::{
     Endpoint, EndpointAddr, EndpointId,
-    endpoint::{Connection, ConnectionError, QuicTransportConfig, VarInt, WriteError, presets},
+    endpoint::{
+        ConnectOptions, Connection, ConnectionError, QuicTransportConfig, VarInt, WriteError,
+        presets,
+    },
 };
-use iroh_blobs::protocol::{ChunkRangesSeq, Request};
+use iroh_blobs::protocol::{ChunkRangesSeq, GetManyRequest, Request};
 use nrz_contract::artifact_ingress_v1::{self as wire, Open, Reply, Resume};
+use nrz_runtime_artifact::ArtifactRoot;
 use std::{
     collections::BTreeMap,
     fs::File,
     future::Future,
-    io::{self, Seek as _, SeekFrom, Write},
+    io::{self, BufWriter, Read as _, Seek as _, SeekFrom, Write},
     net::SocketAddr,
     ops::{Bound, RangeBounds as _},
+    path::PathBuf,
     pin::Pin,
     time::Duration,
 };
 use tokio::{io::AsyncReadExt as _, sync::mpsc, time::Instant};
 use uuid::Uuid;
+
+pub use nrz_contract::artifact_ingress_v1::{
+    MAX_GROUP_BYTES, MAX_GROUP_FILE_BYTES, MAX_GROUP_FILES,
+};
 
 /// The caller freezes these files before admission. The selected receiver still
 /// independently verifies each byte; a producer's filesystem is not authority.
@@ -33,6 +42,29 @@ pub struct FrozenBlob {
     pub hash: [u8; 32],
     pub bytes: u64,
     pub file: File,
+}
+/// A member of an owned frozen directory, opened only when requested.
+pub struct FrozenTreeBlob {
+    pub hash: [u8; 32],
+    pub bytes: u64,
+    pub path: PathBuf,
+}
+struct CatalogBlob {
+    hash: [u8; 32],
+    bytes: u64,
+    source: BlobSource,
+}
+enum BlobSource {
+    File(File),
+    Rooted(ArtifactRoot, PathBuf),
+}
+impl BlobSource {
+    fn open(&self) -> io::Result<File> {
+        match self {
+            Self::File(file) => file.try_clone(),
+            Self::Rooted(root, path) => root.open_file(path),
+        }
+    }
 }
 pub struct TransferTarget {
     pub endpoint_id: String,
@@ -53,7 +85,8 @@ type Reconciliation = Box<
 
 pub struct TransferProvider {
     endpoint: Endpoint,
-    blobs: BTreeMap<[u8; 32], FrozenBlob>,
+    blobs: BTreeMap<[u8; 32], CatalogBlob>,
+    _frozen: Option<tempfile::TempDir>,
     #[cfg(test)]
     pub(crate) encoder_gate: std::sync::Mutex<Option<EncoderGate>>,
 }
@@ -66,12 +99,43 @@ pub(crate) type EncoderGate = (
 impl TransferProvider {
     /// Construct before API admission so its fresh peer ID is part of that input.
     pub async fn bind(blobs: impl IntoIterator<Item = FrozenBlob>) -> anyhow::Result<Self> {
-        let mut catalog = BTreeMap::new();
+        let mut catalog = Vec::new();
         for blob in blobs {
+            let metadata = blob.file.metadata()?;
             ensure!(
-                blob.file.metadata()?.is_file() && blob.file.metadata()?.len() == blob.bytes,
+                metadata.is_file() && metadata.len() == blob.bytes,
                 "frozen blob size changed"
             );
+            catalog.push(CatalogBlob {
+                hash: blob.hash,
+                bytes: blob.bytes,
+                source: BlobSource::File(blob.file),
+            });
+        }
+        Self::bind_catalog(catalog, None).await
+    }
+    /// Retain the frozen tree through transfer, reconciliation, and encoder retirement.
+    pub async fn bind_frozen_tree(
+        frozen: tempfile::TempDir,
+        blobs: impl IntoIterator<Item = FrozenTreeBlob>,
+    ) -> anyhow::Result<Self> {
+        let root = ArtifactRoot::open(frozen.path())?;
+        let blobs = blobs
+            .into_iter()
+            .map(|blob| CatalogBlob {
+                hash: blob.hash,
+                bytes: blob.bytes,
+                source: BlobSource::Rooted(root.clone(), blob.path),
+            })
+            .collect::<Vec<_>>();
+        Self::bind_catalog(blobs, Some(frozen)).await
+    }
+    async fn bind_catalog(
+        blobs: impl IntoIterator<Item = CatalogBlob>,
+        frozen: Option<tempfile::TempDir>,
+    ) -> anyhow::Result<Self> {
+        let mut catalog = BTreeMap::new();
+        for blob in blobs {
             if let Some(old) = catalog.insert(blob.hash, blob) {
                 ensure!(
                     old.bytes == catalog[&old.hash].bytes,
@@ -96,6 +160,7 @@ impl TransferProvider {
         Ok(Self {
             endpoint,
             blobs: catalog,
+            _frozen: frozen,
             #[cfg(test)]
             encoder_gate: std::sync::Mutex::new(None),
         })
@@ -250,6 +315,11 @@ impl TransferProvider {
             "source admission expired before opening"
         );
         let mut resumable = resume;
+        let mut selected_alpn = if resume {
+            None
+        } else {
+            Some(wire::ALPN.to_vec())
+        };
         let mut attaching = false;
         let mut failures = 0u32;
         let can_reconcile = reconcile.is_some();
@@ -267,25 +337,39 @@ impl TransferProvider {
                         until
                     },
                     async {
-                        let connection = match self
-                            .endpoint
-                            .connect(
-                                address.clone(),
-                                if resumable {
-                                    wire::RESUME_ALPN
-                                } else {
-                                    wire::ALPN
-                                },
-                            )
-                            .await
-                        {
-                            Ok(connection) => connection,
-                            Err(error) if resumable && !attaching && unsupported_alpn(&error) => {
-                                resumable = false;
-                                self.endpoint.connect(address.clone(), wire::ALPN).await?
+                        let connection = if let Some(alpn) = &selected_alpn {
+                            self.endpoint.connect(address.clone(), alpn).await?
+                        } else {
+                            let negotiated = async {
+                                Ok::<_, anyhow::Error>(
+                                    self.endpoint
+                                        .connect_with_opts(
+                                            address.clone(),
+                                            wire::GROUP_ALPN,
+                                            ConnectOptions::new().with_additional_alpns(vec![
+                                                wire::RESUME_ALPN.to_vec(),
+                                            ]),
+                                        )
+                                        .await?
+                                        .await?,
+                                )
                             }
-                            Err(error) => return Err(error.into()),
+                            .await;
+                            match negotiated {
+                                Ok(connection) => connection,
+                                Err(error) if unsupported_alpn(error.as_ref()) => {
+                                    self.endpoint.connect(address.clone(), wire::ALPN).await?
+                                }
+                                Err(error) => return Err(error),
+                            }
                         };
+                        let alpn = connection.alpn();
+                        ensure!(
+                            [wire::GROUP_ALPN, wire::RESUME_ALPN, wire::ALPN].contains(&alpn),
+                            "receiver negotiated an unsupported source protocol"
+                        );
+                        resumable = alpn != wire::ALPN;
+                        selected_alpn = Some(alpn.to_vec());
                         ensure!(
                             connection.remote_id() == peer,
                             "admission target peer changed"
@@ -373,6 +457,62 @@ impl TransferProvider {
             }
         }
     }
+    fn requested_members(
+        &self,
+        request: Request,
+        resumable: bool,
+        grouped: bool,
+    ) -> anyhow::Result<Vec<(&CatalogBlob, ChunkRanges)>> {
+        match request {
+            Request::Get(request) => {
+                let blob = self
+                    .blobs
+                    .get(request.hash.as_bytes())
+                    .context("requested blob is outside frozen operation")?;
+                let ranges = if resumable {
+                    suffix_ranges(&request.ranges, blob.bytes)?
+                } else {
+                    ensure!(
+                        request.ranges == ChunkRangesSeq::from_ranges([ChunkRanges::all()]),
+                        "only one whole raw root is supported"
+                    );
+                    ChunkRanges::all()
+                };
+                Ok(vec![(blob, ranges)])
+            }
+            Request::GetMany(request) => {
+                ensure!(grouped, "blob groups require the grouped source protocol");
+                ensure!(
+                    !request.hashes.is_empty() && request.hashes.len() <= MAX_GROUP_FILES,
+                    "bounded nonempty blob group required"
+                );
+                let canonical = request.hashes.iter().copied().collect::<GetManyRequest>();
+                ensure!(
+                    request == canonical,
+                    "only canonical distinct whole raw roots are supported in a group"
+                );
+                let mut bytes = 0_u64;
+                let mut members = Vec::with_capacity(request.hashes.len());
+                for hash in request.hashes {
+                    let blob = self
+                        .blobs
+                        .get(hash.as_bytes())
+                        .context("requested blob is outside frozen operation")?;
+                    ensure!(
+                        blob.bytes <= MAX_GROUP_FILE_BYTES,
+                        "group member exceeds byte limit"
+                    );
+                    bytes = bytes
+                        .checked_add(blob.bytes)
+                        .context("blob group byte overflow")?;
+                    ensure!(bytes <= MAX_GROUP_BYTES, "blob group exceeds byte limit");
+                    members.push((blob, ChunkRanges::all()));
+                }
+                Ok(members)
+            }
+            _ => anyhow::bail!("only exact raw Get or GetMany is supported"),
+        }
+    }
     async fn serve_generation(
         &self,
         connection: &Connection,
@@ -396,15 +536,15 @@ impl TransferProvider {
                 streams = connection.accept_bi() => {
                     let (mut writer, mut reader) = streams?;
                     let (request, _) = Request::read_async(&mut reader).await?;
-                    let Request::Get(request) = request else { anyhow::bail!("only exact raw Get is supported"); };
-                    let blob = self.blobs.get(request.hash.as_bytes())
-                        .context("requested blob is outside frozen operation")?;
-                    let ranges = if resumable { suffix_ranges(&request.ranges, blob.bytes)? } else {
-                        ensure!(request.ranges == ChunkRangesSeq::from_ranges([ChunkRanges::all()]),
-                            "only one whole raw root is supported");
-                        ChunkRanges::all()
-                    };
-                    match serve_file(blob, ranges, &mut writer, producer).await {
+                    // Validate every requested member before emitting any response bytes.
+                    let members = self.requested_members(request, resumable, connection.alpn() == wire::GROUP_ALPN)?;
+                    let encoded = async {
+                        for (blob, ranges) in members {
+                            serve_file(blob, ranges, &mut writer, producer).await?;
+                        }
+                        Ok::<_, anyhow::Error>(())
+                    }.await;
+                    match encoded {
                         Ok(()) => { writer.finish()?; }
                         Err(error) if resumable && stream_interrupted(&error) => {}
                         Err(error) => return Err(error),
@@ -437,12 +577,12 @@ impl FileProducer {
     }
 }
 async fn serve_file(
-    blob: &FrozenBlob,
+    blob: &CatalogBlob,
     ranges: ChunkRanges,
     writer: &mut iroh::endpoint::SendStream,
     producer: &mut FileProducer,
 ) -> anyhow::Result<()> {
-    let mut file = blob.file.try_clone()?;
+    let mut file = blob.source.open()?;
     let expected = blob.hash;
     let size = blob.bytes;
     let (tx, mut rx) = mpsc::channel::<Bytes>(1);
@@ -464,6 +604,22 @@ async fn serve_file(
             }
             file.seek(SeekFrom::Start(0))?;
             ensure!(file.metadata()?.len() == size, "frozen blob changed");
+            if size <= iroh_blobs::store::IROH_BLOCK_SIZE.bytes() as u64
+                && ranges == ChunkRanges::all()
+            {
+                // A whole Bao block has one leaf and no parent/outboard bytes.
+                let mut encoded = vec![0; 8 + usize::try_from(size)?];
+                encoded[..8].copy_from_slice(&size.to_le_bytes());
+                file.read_exact(&mut encoded[8..])?;
+                ensure_file_end(&mut file, size)?;
+                ensure!(
+                    bao_tree::blake3::hash(&encoded[8..]).as_bytes() == &expected,
+                    "frozen blob hash changed"
+                );
+                tx.blocking_send(Bytes::from(encoded))
+                    .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, ConsumerClosed))?;
+                return Ok(());
+            }
             let mut outboard = PreOrderOutboard {
                 root: [0; 32].into(),
                 tree: BaoTree::new(size, iroh_blobs::store::IROH_BLOCK_SIZE),
@@ -474,9 +630,13 @@ async fn serve_file(
                 outboard.root.as_bytes() == &expected,
                 "frozen blob hash changed"
             );
-            let mut output = ChunkWriter(tx);
+            ensure_file_end(&mut file, size)?;
+            // Coalesce Bao parent and leaf writes before crossing the blocking/async boundary.
+            let mut output = BufWriter::with_capacity(64 * 1024, ChunkWriter(tx));
             output.write_all(&size.to_le_bytes())?;
-            encode_ranges_validated(&file, &outboard, &ranges, output)?;
+            encode_ranges_validated(&file, &outboard, &ranges, &mut output)?;
+            ensure_file_end(&mut file, size)?;
+            output.flush()?;
             Ok(())
         },
     ));
@@ -500,6 +660,15 @@ async fn serve_file(
     }
     Ok(())
 }
+fn ensure_file_end(file: &mut File, size: u64) -> anyhow::Result<()> {
+    file.seek(SeekFrom::Start(size))?;
+    ensure!(
+        file.metadata()?.len() == size && file.read(&mut [0])? == 0,
+        "frozen blob changed"
+    );
+    Ok(())
+}
+
 fn suffix_ranges(sequence: &ChunkRangesSeq, bytes: u64) -> anyhow::Result<ChunkRanges> {
     let (root, ranges) = sequence
         .as_single()
@@ -543,6 +712,7 @@ fn retryable_connection(error: &anyhow::Error) -> bool {
         || matches!(cause.downcast_ref::<ConnectionError>(),
             Some(ConnectionError::ApplicationClosed(close)) if close.error_code == VarInt::from_u32(0)))
 }
+
 fn unsupported_alpn(error: &(dyn std::error::Error + 'static)) -> bool {
     let mut cause = Some(error);
     while let Some(current) = cause {
@@ -561,7 +731,7 @@ fn unsupported_alpn(error: &(dyn std::error::Error + 'static)) -> bool {
 struct ChunkWriter(mpsc::Sender<Bytes>);
 impl Write for ChunkWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        for chunk in bytes.chunks(16 * 1024) {
+        for chunk in bytes.chunks(64 * 1024) {
             self.0
                 .blocking_send(Bytes::copy_from_slice(chunk))
                 .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, ConsumerClosed))?;
@@ -606,3 +776,11 @@ mod continuation_tests;
 #[cfg(test)]
 #[path = "ingress_v2_resume_tests.rs"]
 mod resume_tests;
+
+#[cfg(test)]
+#[path = "ingress_v2_catalog_tests.rs"]
+mod catalog_tests;
+
+#[cfg(test)]
+#[path = "ingress_v2_group_tests.rs"]
+mod group_tests;

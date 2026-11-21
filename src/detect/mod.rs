@@ -12,6 +12,7 @@ pub mod presets;
 mod pubspec;
 pub mod python;
 pub mod python_launch;
+pub mod source_build_facts;
 pub mod ssr;
 pub mod static_html;
 pub mod types;
@@ -37,6 +38,8 @@ mod package_manager_tests;
 mod presets_tests;
 #[cfg(test)]
 mod python_tests;
+#[cfg(test)]
+mod source_build_facts_tests;
 #[cfg(test)]
 mod ssr_tests;
 #[cfg(test)]
@@ -136,6 +139,7 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
         name: preset.name.to_string(),
         version: None,
         suggested_compute,
+        source_build_facts: None,
         metadata: DetectionMetadata {
             source_build_context: None,
             uses_typescript: detect_typescript(fs),
@@ -170,6 +174,7 @@ fn static_html_detection(
         name: preset.name.to_string(),
         version: None,
         suggested_compute: ComputeType::Static,
+        source_build_facts: None,
         metadata: DetectionMetadata {
             source_build_context: None,
             uses_typescript: None,
@@ -316,6 +321,7 @@ fn detection_from_configured_preset(
         name: preset.name.to_string(),
         version,
         suggested_compute,
+        source_build_facts: None,
         metadata: DetectionMetadata {
             source_build_context: None,
             uses_typescript: detect_typescript(fs),
@@ -529,6 +535,7 @@ fn detection_from_rule_match(
         name: preset.name.to_string(),
         version: matched.version,
         suggested_compute,
+        source_build_facts: None,
         metadata: DetectionMetadata {
             source_build_context: None,
             uses_typescript: detect_typescript(fs),

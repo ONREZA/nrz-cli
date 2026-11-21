@@ -786,6 +786,7 @@ fn python_detection(
         name: framework_name(framework).to_string(),
         version: None,
         suggested_compute: ComputeType::Process,
+        source_build_facts: None,
         metadata: DetectionMetadata {
             source_build_context: None,
             uses_typescript: None,

@@ -2,7 +2,7 @@ use super::*;
 use bao_tree::{ChunkNum, io::BaoContentItem};
 use iroh_blobs::{Hash, get::fsm, protocol::GetRequest};
 
-async fn receiver(alpn: &[u8]) -> Endpoint {
+pub(super) async fn receiver(alpn: &[u8]) -> Endpoint {
     Endpoint::builder(presets::Minimal)
         .clear_ip_transports()
         .bind_addr("127.0.0.1:0")
@@ -13,7 +13,7 @@ async fn receiver(alpn: &[u8]) -> Endpoint {
         .await
         .unwrap()
 }
-fn target(receiver: &Endpoint, hash: Hash) -> TransferTarget {
+pub(super) fn target(receiver: &Endpoint, hash: Hash) -> TransferTarget {
     TransferTarget {
         endpoint_id: receiver.id().to_string(),
         direct_addresses: receiver.addr().ip_addrs().copied().collect(),
@@ -22,21 +22,42 @@ fn target(receiver: &Endpoint, hash: Hash) -> TransferTarget {
         manifest_blake3: hash.to_string(),
     }
 }
+pub(super) struct PausedEncoder {
+    pub entered: tokio::sync::oneshot::Receiver<()>,
+    pub release: std::sync::mpsc::Sender<()>,
+    pub joined: tokio::sync::oneshot::Receiver<()>,
+}
+
+pub(super) fn pause_encoder(provider: &TransferProvider) -> PausedEncoder {
+    let (entered, entered_rx) = tokio::sync::oneshot::channel();
+    let (release, release_rx) = std::sync::mpsc::channel();
+    let (joined, joined_rx) = tokio::sync::oneshot::channel();
+    *provider.encoder_gate.lock().unwrap() = Some((entered, release_rx, joined));
+    PausedEncoder {
+        entered: entered_rx,
+        release,
+        joined: joined_rx,
+    }
+}
+
 async fn fixture() -> (TransferProvider, Hash, Vec<u8>) {
     let bytes: Vec<u8> = (0..2 * 1024 * 1024).map(|n| (n % 251) as u8).collect();
     let hash = Hash::from(*bao_tree::blake3::hash(&bytes).as_bytes());
-    let mut file = tempfile::tempfile().unwrap();
-    file.write_all(&bytes).unwrap();
-    let provider = TransferProvider::bind([FrozenBlob {
-        hash: *hash.as_bytes(),
-        bytes: bytes.len() as u64,
-        file,
-    }])
+    let frozen = tempfile::tempdir().unwrap();
+    std::fs::write(frozen.path().join("blob"), &bytes).unwrap();
+    let provider = TransferProvider::bind_frozen_tree(
+        frozen,
+        [FrozenTreeBlob {
+            hash: *hash.as_bytes(),
+            bytes: bytes.len() as u64,
+            path: "blob".into(),
+        }],
+    )
     .await
     .unwrap();
     (provider, hash, bytes)
 }
-fn start_publish(
+pub(super) fn start_publish(
     provider: TransferProvider,
     receiver: &Endpoint,
     hash: Hash,
@@ -49,7 +70,10 @@ fn start_publish(
         deadline,
     ))
 }
-async fn accept(receiver: &Endpoint, resumed: bool) -> (Connection, iroh::endpoint::SendStream) {
+pub(super) async fn accept(
+    receiver: &Endpoint,
+    resumed: bool,
+) -> (Connection, iroh::endpoint::SendStream) {
     let connection = receiver.accept().await.unwrap().await.unwrap();
     let (mut send, mut receive) = connection.accept_bi().await.unwrap();
     if resumed {
@@ -76,7 +100,7 @@ async fn accept(receiver: &Endpoint, resumed: bool) -> (Connection, iroh::endpoi
     .unwrap();
     (connection, send)
 }
-async fn published(send: &mut iroh::endpoint::SendStream, hash: Hash) {
+pub(super) async fn published(send: &mut iroh::endpoint::SendStream, hash: Hash) {
     write_frame(
         send,
         &Reply::Published {
@@ -90,7 +114,12 @@ async fn published(send: &mut iroh::endpoint::SendStream, hash: Hash) {
     .unwrap();
     send.finish().unwrap();
 }
-async fn fetch(connection: &Connection, hash: Hash, start: u64, interrupt: bool) -> Vec<u8> {
+pub(super) async fn fetch(
+    connection: &Connection,
+    hash: Hash,
+    start: u64,
+    interrupt: bool,
+) -> Vec<u8> {
     let state = fsm::start(
         connection.clone(),
         GetRequest::blob_ranges(hash, ChunkRanges::from(ChunkNum(start / 1024)..)),
@@ -304,8 +333,8 @@ async fn frozen_integrity_failure_and_malformed_request_are_terminal() {
             let receiver = receiver(wire::RESUME_ALPN).await;
             let (provider, hash, _) = fixture().await;
             if corrupt {
-                let mut file = provider.blobs[hash.as_bytes()].file.try_clone().unwrap();
-                file.seek(SeekFrom::Start(0)).unwrap();
+                let path = provider._frozen.as_ref().unwrap().path().join("blob");
+                let mut file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
                 file.write_all(&[255]).unwrap();
             }
             let deadline = Instant::now() + Duration::from_secs(4);
@@ -466,16 +495,20 @@ async fn active_reconciliation_keeps_frozen_producer_until_publication() {
         let bytes = b"exact frozen input across authenticated reconciliation";
         std::fs::write(&path, bytes).unwrap();
         let hash = Hash::from(*bao_tree::blake3::hash(bytes).as_bytes());
-        let provider = TransferProvider::bind([FrozenBlob {
-            hash: *hash.as_bytes(),
-            bytes: bytes.len() as u64,
-            file: File::open(&path).unwrap(),
-        }])
+        let provider = TransferProvider::bind_frozen_tree(
+            frozen,
+            [FrozenTreeBlob {
+                hash: *hash.as_bytes(),
+                bytes: bytes.len() as u64,
+                path: "original".into(),
+            }],
+        )
         .await
         .unwrap();
         let identity = provider.endpoint_id();
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let reconciliations = calls.clone();
+        let retained_path = path.clone();
         let deadline = Instant::now() + Duration::from_secs(6);
         let task = tokio::spawn(provider.publish_resume_with_reconciliation(
             target(&receiver, hash),
@@ -483,7 +516,7 @@ async fn active_reconciliation_keeps_frozen_producer_until_publication() {
             deadline,
             deadline,
             move || {
-                assert!(frozen.path().join("original").exists());
+                assert!(retained_path.exists());
                 assert!(Instant::now() < deadline);
                 let active = reconciliations.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
                 async move {

@@ -277,6 +277,8 @@ pub struct DetectionResult {
     pub version: Option<String>,
     pub suggested_compute: ComputeType,
     pub metadata: DetectionMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_build_facts: Option<super::source_build_facts::SourceBuildFacts>,
     pub reason: String,
 }
 

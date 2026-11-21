@@ -3032,6 +3032,7 @@ dependencies = [
  "iroh",
  "iroh-blobs",
  "nrz-contract",
+ "nrz-runtime-artifact",
  "serde",
  "serde_json",
  "tempfile",

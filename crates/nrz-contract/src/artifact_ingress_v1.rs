@@ -1,10 +1,15 @@
-//! Closed external Source V2 transfer control. Payloads use raw iroh-blobs Get.
+//! Closed external Source V2 transfer control. Payloads use raw iroh-blobs requests.
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const ALPN: &[u8] = b"onreza/artifact-ingress/1";
 /// Live-operation resume is negotiated separately from the original full-transfer protocol.
 pub const RESUME_ALPN: &[u8] = b"onreza/artifact-ingress/2";
+/// Live-operation resume with bounded whole-root iroh-blobs GetMany groups.
+pub const GROUP_ALPN: &[u8] = b"onreza/artifact-ingress/3";
+pub const MAX_GROUP_FILES: usize = 256;
+pub const MAX_GROUP_FILE_BYTES: u64 = 16 * 1024;
+pub const MAX_GROUP_BYTES: u64 = 1024 * 1024;
 pub const MAX_OPEN_BYTES: usize = 8 * 1024 + 1024;
 pub const MAX_REPLY_BYTES: usize = 32 * 1024;
 #[derive(Serialize, Deserialize)]

@@ -4,7 +4,7 @@ use anyhow::ensure;
 use nrz_contract::application_package_v1::APPLICATION_EROFS_PROFILE_V1;
 use nrz_contract::source_bundle_v2::FileEntry;
 use nrz_source_publisher::ingress_v2::{
-    FrozenBlob, PublicationOutcome, TransferProvider, TransferTarget,
+    FrozenTreeBlob, PublicationOutcome, TransferProvider, TransferTarget,
 };
 use std::io::Write as _;
 
@@ -62,7 +62,7 @@ pub(super) async fn publish(
         environment_id,
         attempt,
     } = scope;
-    let (frozen, verified, root, provider) = timed_stage("packaging", json, build_logs, async {
+    let (verified, provider) = timed_stage("packaging", json, build_logs, async {
         let frozen = tempfile::Builder::new()
             .prefix("nrz-source-v2-")
             .tempdir()?;
@@ -71,15 +71,16 @@ pub(super) async fn publish(
             crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::Embedded,
             &tree,
         )?;
-        let mut manifest = tempfile::tempfile()?;
-        manifest.write_all(&bytes)?;
-        manifest.sync_all()?;
-        let mut blobs = vec![FrozenBlob {
+        {
+            let mut manifest = std::fs::File::create(frozen.path().join("manifest"))?;
+            manifest.write_all(&bytes)?;
+            manifest.sync_all()?;
+        }
+        let mut blobs = vec![FrozenTreeBlob {
             hash: digest(verified.manifest_blake3())?,
             bytes: verified.manifest_size_bytes(),
-            file: manifest,
+            path: "manifest".into(),
         }];
-        let root = nrz_runtime_artifact::ArtifactRoot::open(&tree)?;
         for entry in &verified.wire().files {
             if let FileEntry::File {
                 path,
@@ -88,15 +89,15 @@ pub(super) async fn publish(
                 ..
             } = entry
             {
-                blobs.push(FrozenBlob {
+                blobs.push(FrozenTreeBlob {
                     hash: digest(&blob_digest.value)?,
                     bytes: *size,
-                    file: root.open_file(Path::new(&path.0))?,
+                    path: Path::new("tree").join(&path.0),
                 });
             }
         }
-        let provider = TransferProvider::bind(blobs).await?;
-        Ok((frozen, verified, root, provider))
+        let provider = TransferProvider::bind_frozen_tree(frozen, blobs).await?;
+        Ok((verified, provider))
     })
     .await?;
     let summary = verified.summary();
@@ -172,8 +173,6 @@ pub(super) async fn publish(
         .context("source operation expired before transfer")?;
     let instant = tokio::time::Instant::now();
     let deadline = instant + continuation;
-    // The detached transfer owner also owns the frozen tree through reconciliation.
-    let frozen = std::sync::Arc::new((root, frozen));
     let client = client.clone();
     let receiver = admitted.clone();
     // The pull protocol has no all-bytes-sent boundary before exact publication.
@@ -191,16 +190,8 @@ pub(super) async fn publish(
                 instant + remaining,
                 deadline,
                 move || {
-                    let (client, body, receiver, frozen) = (
-                        client.clone(),
-                        body.clone(),
-                        receiver.clone(),
-                        frozen.clone(),
-                    );
-                    async move {
-                        let _frozen = frozen;
-                        reconcile_before(&client, &body, &receiver, deadline).await
-                    }
+                    let (client, body, receiver) = (client.clone(), body.clone(), receiver.clone());
+                    async move { reconcile_before(&client, &body, &receiver, deadline).await }
                 },
             )
             .await?;

@@ -23,6 +23,7 @@ pub(crate) fn make_detection(
         version: None,
         suggested_compute: crate::detect::types::ComputeType::Process,
         reason: String::new(),
+        source_build_facts: None,
         metadata: crate::detect::types::DetectionMetadata {
             source_build_context: None,
             uses_typescript: None,

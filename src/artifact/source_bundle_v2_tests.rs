@@ -394,3 +394,54 @@ fn dependency_roles_follow_explicit_direct_cli_or_builder_packaging() -> anyhow:
     }
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn freezes_inventory_larger_than_the_file_descriptor_limit() -> anyhow::Result<()> {
+    const CHILD: &str = "NRZ_TEST_FREEZE_FD_LIMIT";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new("sh")
+            .args(["-c", "ulimit -n 128 && exec \"$@\"", "freeze-fd-test"])
+            .arg(std::env::current_exe()?)
+            .args([
+                "--exact",
+                "artifact::source_bundle_v2::tests::freezes_inventory_larger_than_the_file_descriptor_limit",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+        return Ok(());
+    }
+    let source = tempdir()?;
+    let output = tempdir()?;
+    let mut files = Vec::new();
+    for index in 0..2048_u32 {
+        let path = format!("{index}.html");
+        let bytes = index.to_le_bytes();
+        fs::write(source.path().join(&path), bytes)?;
+        files.push(file(&path, &bytes));
+    }
+    let destination = output.path().join("frozen");
+    let (_, verified) = freeze_source_bundle(
+        &ArtifactRoot::open(source.path())?,
+        &static_manifest(),
+        &files,
+        &RuntimeArtifactScan::All,
+        RuntimeDependencyPackaging::Embedded,
+        &destination,
+        SourceRuntimeMetadata::default(),
+    )?;
+    assert_eq!(verified.summary().file_count, 2048);
+    assert_eq!(
+        fs::read(destination.join("2047.html"))?,
+        2047_u32.to_le_bytes()
+    );
+    Ok(())
+}

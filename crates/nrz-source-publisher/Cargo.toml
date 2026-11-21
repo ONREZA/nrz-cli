@@ -18,6 +18,7 @@ bao-tree = { version = "0.17", default-features = false, features = ["fs", "vali
 anyhow = "1"
 bytes = "1"
 nrz-contract = { path = "../nrz-contract" }
+nrz-runtime-artifact = { path = "../nrz-runtime-artifact" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

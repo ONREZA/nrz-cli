@@ -26,9 +26,12 @@ fn target(endpoint: &Endpoint) -> TransferTarget {
 async fn accepted_source_session_outlives_selection_sample_but_not_operation() {
     for operation_expires_first in [false, true] {
         let receiver = receiver().await;
-        let provider = TransferProvider::bind(std::iter::empty::<FrozenBlob>())
-            .await
-            .unwrap();
+        let provider = TransferProvider::bind_frozen_tree(
+            tempfile::tempdir().unwrap(),
+            std::iter::empty::<FrozenTreeBlob>(),
+        )
+        .await
+        .unwrap();
         let opening = Instant::now() + Duration::from_secs(2);
         let operation = if operation_expires_first {
             opening + Duration::from_millis(100)
@@ -92,9 +95,12 @@ async fn accepted_source_session_outlives_selection_sample_but_not_operation() {
 #[tokio::test]
 async fn expired_opening_never_connects_even_with_remaining_operation_budget() {
     let receiver = receiver().await;
-    let provider = TransferProvider::bind(std::iter::empty::<FrozenBlob>())
-        .await
-        .unwrap();
+    let provider = TransferProvider::bind_frozen_tree(
+        tempfile::tempdir().unwrap(),
+        std::iter::empty::<FrozenTreeBlob>(),
+    )
+    .await
+    .unwrap();
     let now = Instant::now();
     assert!(
         provider

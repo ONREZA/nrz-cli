@@ -790,8 +790,8 @@ pub(super) fn build_logical_manifest(
     })
 }
 
-fn prerender_paths(manifest: &Manifest) -> anyhow::Result<Vec<String>> {
-    let mut paths = Vec::new();
+fn prerender_paths(manifest: &Manifest) -> anyhow::Result<HashSet<String>> {
+    let mut paths = HashSet::new();
     if let Some(prerender) = &manifest.prerender {
         let prerender_layer = manifest
             .layers
@@ -802,9 +802,9 @@ fn prerender_paths(manifest: &Manifest) -> anyhow::Result<Vec<String>> {
             })?;
         let root_path = normalize_layer_root(&prerender_layer.directory)?;
         for page in prerender.pages.values() {
-            paths.push(join_entrypoint(&root_path, &page.html)?);
+            paths.insert(join_entrypoint(&root_path, &page.html)?);
             if let Some(data) = &page.data {
-                paths.push(join_entrypoint(&root_path, data)?);
+                paths.insert(join_entrypoint(&root_path, data)?);
             }
         }
     }
@@ -815,7 +815,7 @@ fn file_role(
     manifest: &Manifest,
     path: &str,
     matched_layer: Option<&crate::build::manifest::Layer>,
-    prerender_paths: &[String],
+    prerender_paths: &HashSet<String>,
     scan: &RuntimeArtifactScan,
     dependency_packaging: RuntimeDependencyPackaging,
 ) -> anyhow::Result<(SourceLogicalManifestFileRole, Option<String>)> {
@@ -833,7 +833,7 @@ fn file_role(
         ));
     }
 
-    if prerender_paths.iter().any(|candidate| candidate == path) {
+    if prerender_paths.contains(path) {
         return Ok((
             SourceLogicalManifestFileRole::Prerender,
             manifest

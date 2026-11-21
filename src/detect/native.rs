@@ -666,6 +666,7 @@ fn detection(fs: &dyn Fs, recipe: NativeRecipe, configured: bool) -> DetectionRe
         name: name.into(),
         version: None,
         suggested_compute: compute,
+        source_build_facts: None,
         metadata: DetectionMetadata {
             source_build_context: None,
             uses_typescript: None,

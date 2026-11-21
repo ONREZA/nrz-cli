@@ -69,9 +69,10 @@ pub fn resolve_and_bind_detection(
     fs: &dyn Fs,
     detection: &mut super::types::DetectionResult,
 ) -> anyhow::Result<()> {
-    let config = fs
-        .read_file("onreza.toml")
-        .map(|text| toml::from_str::<crate::config::ProjectConfig>(&text))
+    let config_source = fs.read_file("onreza.toml");
+    let config = config_source
+        .as_deref()
+        .map(toml::from_str::<crate::config::ProjectConfig>)
         .transpose()
         .context("invalid source build context in onreza.toml")?
         .unwrap_or_default();
@@ -95,6 +96,8 @@ pub fn resolve_and_bind_detection(
                 .as_deref()
                 .is_some_and(|value| value.eq_ignore_ascii_case("static")),
     )?;
+    detection.source_build_facts =
+        super::source_build_facts::collect(fs, detection, &config, config_source.is_some());
     Ok(())
 }
 

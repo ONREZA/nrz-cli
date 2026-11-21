@@ -17,7 +17,7 @@ use iroh::{
 use iroh_blobs::{Hash, get::fsm, protocol::GetRequest};
 use nrz_contract::artifact_ingress_v1::{self as wire, Open, Reply, Resume};
 use nrz_source_publisher::ingress_v2::{
-    FrozenBlob, PublicationOutcome, TransferProvider, TransferTarget, read_frame, write_frame,
+    FrozenTreeBlob, PublicationOutcome, TransferProvider, TransferTarget, read_frame, write_frame,
 };
 use std::{
     fs::File,
@@ -118,11 +118,18 @@ async fn session(file: &File, hash: Hash, scenario: &str) -> anyhow::Result<()> 
         .alpns(vec![wire::RESUME_ALPN.to_vec()])
         .bind()
         .await?;
-    let provider = TransferProvider::bind([FrozenBlob {
-        hash: *hash.as_bytes(),
-        bytes: BYTES,
-        file: file.try_clone()?,
-    }])
+    let frozen = tempfile::tempdir_in("/var/tmp")?;
+    let mut source = file.try_clone()?;
+    source.seek(SeekFrom::Start(0))?;
+    io::copy(&mut source, &mut File::create(frozen.path().join("blob"))?)?;
+    let provider = TransferProvider::bind_frozen_tree(
+        frozen,
+        [FrozenTreeBlob {
+            hash: *hash.as_bytes(),
+            bytes: BYTES,
+            path: "blob".into(),
+        }],
+    )
     .await?;
     let operation_id = Uuid::from_u128(1);
     let session_id = Uuid::from_u128(2);
