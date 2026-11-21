@@ -1,6 +1,6 @@
 {
-  "runtimeReleaseId": "runtime-75c198731224abbd49163357e249d15560b7564b",
-  "manifestUrl": "https://releases.onreza.ru/releases/runtime-75c198731224abbd49163357e249d15560b7564b/manifest.json",
-  "manifestSha256": "18d758245fa6633522d620d9be2ee1c81ab0b02cf7eb4c66f99dd708eb82027d",
-  "signatureUrl": "https://releases.onreza.ru/releases/runtime-75c198731224abbd49163357e249d15560b7564b/manifest.sig"
+  "runtimeReleaseId": "runtime-5bf016e0885b4b70c77b9c12ce84c528aa80b531",
+  "manifestUrl": "https://releases.onreza.ru/releases/runtime-5bf016e0885b4b70c77b9c12ce84c528aa80b531/manifest.json",
+  "manifestSha256": "0b0067caf17506e607410ded04d2f750a19309d71276794425b866e7a4f7fe61",
+  "signatureUrl": "https://releases.onreza.ru/releases/runtime-5bf016e0885b4b70c77b9c12ce84c528aa80b531/manifest.sig"
 }
