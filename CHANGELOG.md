@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.52.1] - 2026-11-21
+
+### 🔧 Changed
+
+- **deps:** refresh cli dependencies ([07abd79](https://github.com/ONREZA/nrz-cli/commit/07abd79c750476e66176af620be4cd6213cc6c28))
+
 ## [0.52.0] - 2026-11-20
 
 ### 🐛 Bug Fixes
