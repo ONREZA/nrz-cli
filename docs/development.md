@@ -32,7 +32,7 @@ Rust/Bun image versions from `.prototools` and cargo-deny from the Moon toolchai
 so container checks use the same pins as local development.
 
 All workspace packages require Rust 1.99 or newer. The development and release
-toolchain remains pinned to 1.99.1. Dependency ranges, reproducible tool pins and
+toolchain is pinned to 1.100.0. Dependency ranges, reproducible tool pins and
 runtime artifact identities follow the [dependency policy](dependency-maintenance.md).
 
 Moon caches static checks by their declared inputs. Tests, duplicate detection

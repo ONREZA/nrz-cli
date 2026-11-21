@@ -141,7 +141,7 @@ codegen-units = 1
 [patch.crates-io]
 bao-tree = { git = "https://github.com/n0-computer/bao-tree", rev = "d50f2b2ce4b2477f9c7bfa3c452914b9bc66b334" }
 iroh-tickets = { git = "https://github.com/ONREZA/iroh-tickets", rev = "0aa7ba6987c6f5ecb7221946c445d5d71354b5ab" }
-iroh = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }
-iroh-base = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }
-iroh-relay = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }
-iroh-dns = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }
+iroh = { git = "https://github.com/ONREZA/iroh", rev = "f24a5bf33ecceee3083e4dbb8f256e3d4db70be3" }
+iroh-base = { git = "https://github.com/ONREZA/iroh", rev = "f24a5bf33ecceee3083e4dbb8f256e3d4db70be3" }
+iroh-relay = { git = "https://github.com/ONREZA/iroh", rev = "f24a5bf33ecceee3083e4dbb8f256e3d4db70be3" }
+iroh-dns = { git = "https://github.com/ONREZA/iroh", rev = "f24a5bf33ecceee3083e4dbb8f256e3d4db70be3" }

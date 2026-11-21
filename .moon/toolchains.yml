@@ -1,7 +1,7 @@
 $schema: "./cache/schemas/toolchains.json"
 
 proto:
-  version: "0.63.2"
+  version: "0.64.0"
 
 bun:
   versionFromPrototools: true
@@ -16,9 +16,9 @@ javascript:
 rust:
   versionFromPrototools: true
   syncToolchainConfig: false
-  binstallVersion: "1.26.1"
+  binstallVersion: "1.27.0"
   components: ["rustfmt", "clippy"]
   bins:
-    - "cargo-deny@0.20.2"
+    - "cargo-deny@0.22.0"
     - "cocogitto@7.0.0"
     - "cargo-mutants@27.1.0"

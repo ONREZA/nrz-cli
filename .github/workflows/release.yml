@@ -84,11 +84,11 @@ jobs:
         run: bash .github/scripts/validate-release-mode.sh
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24.22.1'
+          node-version: '24.22.3'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
       - name: Install npm with trusted dist-tag support
-        run: npm install --global npm@12.2.1
+        run: npm install --global npm@12.2.3
       - name: Select published version and verify channel
         run: |
           if [[ "$CHANNEL" == stable ]]; then
@@ -136,7 +136,7 @@ jobs:
       - name: Setup Node.js for host Git metadata
         uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24.22.1'
+          node-version: '24.22.3'
 
       - name: Capture Git metadata from the selected checkout
         run: node .dagger/scripts/capture-git-metadata.ts
@@ -327,13 +327,13 @@ jobs:
         if: inputs.publish_npm && !inputs.hold_draft
         uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24.22.1'
+          node-version: '24.22.3'
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
       - name: Install npm with trusted publishing support
         if: inputs.publish_npm && !inputs.hold_draft
-        run: npm install --global npm@12.2.1
+        run: npm install --global npm@12.2.3
 
       - name: Generate npm package
         if: inputs.publish_npm && !inputs.hold_draft
