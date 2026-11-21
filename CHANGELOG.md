@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.54.0] - 2026-11-21
+
+### ✨ Features
+
+- **deploy:** speed up source publication ([bc3a1f2](https://github.com/ONREZA/nrz-cli/commit/bc3a1f2960b87ed5316e7edc81cef5d83b9eae49))
+
 ## [0.53.0] - 2026-11-21
 
 ### ✨ Features
