@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.53.0] - 2026-11-21
+
+### ✨ Features
+
+- **deploy:** report source stage timings ([acf5af8](https://github.com/ONREZA/nrz-cli/commit/acf5af8b31a52befef86f14f6b28392c862c895f))
+
 ## [0.52.2] - 2026-11-21
 
 ### 🔧 Changed
