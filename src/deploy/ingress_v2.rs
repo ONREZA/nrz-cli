@@ -53,6 +53,7 @@ pub(super) async fn publish(
     scope: PublicationScope<'_>,
     source_admitted_or_unknown: &mut bool,
     json: bool,
+    build_logs: Option<&BuildLogEmitter>,
 ) -> anyhow::Result<()> {
     let PublicationScope {
         deployment_id,
@@ -61,39 +62,43 @@ pub(super) async fn publish(
         environment_id,
         attempt,
     } = scope;
-    let frozen = tempfile::Builder::new()
-        .prefix("nrz-source-v2-")
-        .tempdir()?;
-    let tree = frozen.path().join("tree");
-    let (bytes, verified) = plan.freeze_source_bundle(
-        crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::Embedded,
-        &tree,
-    )?;
-    let mut manifest = tempfile::tempfile()?;
-    manifest.write_all(&bytes)?;
-    manifest.sync_all()?;
-    let mut blobs = vec![FrozenBlob {
-        hash: digest(verified.manifest_blake3())?,
-        bytes: verified.manifest_size_bytes(),
-        file: manifest,
-    }];
-    let root = nrz_runtime_artifact::ArtifactRoot::open(&tree)?;
-    for entry in &verified.wire().files {
-        if let FileEntry::File {
-            path,
-            blob_digest,
-            size,
-            ..
-        } = entry
-        {
-            blobs.push(FrozenBlob {
-                hash: digest(&blob_digest.value)?,
-                bytes: *size,
-                file: root.open_file(Path::new(&path.0))?,
-            });
+    let (frozen, verified, root, provider) = timed_stage("packaging", json, build_logs, async {
+        let frozen = tempfile::Builder::new()
+            .prefix("nrz-source-v2-")
+            .tempdir()?;
+        let tree = frozen.path().join("tree");
+        let (bytes, verified) = plan.freeze_source_bundle(
+            crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::Embedded,
+            &tree,
+        )?;
+        let mut manifest = tempfile::tempfile()?;
+        manifest.write_all(&bytes)?;
+        manifest.sync_all()?;
+        let mut blobs = vec![FrozenBlob {
+            hash: digest(verified.manifest_blake3())?,
+            bytes: verified.manifest_size_bytes(),
+            file: manifest,
+        }];
+        let root = nrz_runtime_artifact::ArtifactRoot::open(&tree)?;
+        for entry in &verified.wire().files {
+            if let FileEntry::File {
+                path,
+                blob_digest,
+                size,
+                ..
+            } = entry
+            {
+                blobs.push(FrozenBlob {
+                    hash: digest(&blob_digest.value)?,
+                    bytes: *size,
+                    file: root.open_file(Path::new(&path.0))?,
+                });
+            }
         }
-    }
-    let provider = TransferProvider::bind(blobs).await?;
+        let provider = TransferProvider::bind(blobs).await?;
+        Ok((frozen, verified, root, provider))
+    })
+    .await?;
     let summary = verified.summary();
     let operation_id = Uuid::now_v7();
     let idempotency_key = Uuid::now_v7();
@@ -113,19 +118,30 @@ pub(super) async fn publish(
         "cliEndpointId":provider.endpoint_id(),
     }))?;
     // Retries are confined to this exact frozen input and live endpoint identity.
-    let admitted = admit(client, deployment_id, &body, source_admitted_or_unknown)
-        .await
-        .map_err(|error| map_publication_error(error, json, &plan.artifact.file_breakdown))?;
-    validate_admission(
-        &admitted,
-        &body,
-        workspace_id,
-        project_id,
-        environment_id,
-        attempt,
-    )?;
+    let admitted = timed_stage("admission", json, build_logs, async {
+        let admitted = admit(client, deployment_id, &body, source_admitted_or_unknown)
+            .await
+            .map_err(|error| map_publication_error(error, json, &plan.artifact.file_breakdown))?;
+        validate_admission(
+            &admitted,
+            &body,
+            workspace_id,
+            project_id,
+            environment_id,
+            attempt,
+        )?;
+        if admitted.state == nrz_api::Admit200ResponseState::Closed {
+            require_published(&admitted)?;
+        }
+        Ok(admitted)
+    })
+    .await?;
     if admitted.state == nrz_api::Admit200ResponseState::Closed {
-        require_published(&admitted)?;
+        const CONFIRMED: &str = "Source V2 publication confirmed by authenticated admission";
+        output::status(json, "~", CONFIRMED, output::Phase::Deploy);
+        if let Some(emitter) = build_logs {
+            emitter.info(BuildLogPhase::Upload, CONFIRMED);
+        }
         return Ok(());
     }
     let grant = admitted
@@ -160,37 +176,88 @@ pub(super) async fn publish(
     let frozen = std::sync::Arc::new((root, frozen));
     let client = client.clone();
     let receiver = admitted.clone();
-    let outcome = provider
-        .publish_resume_with_reconciliation(
-            TransferTarget {
-                endpoint_id: admitted.receiver_endpoint_id.clone(),
-                direct_addresses: addresses,
-                operation_id,
-                session_id: admitted.receiver_session_id,
-                manifest_blake3: verified.manifest_blake3().into(),
-            },
-            grant.clone(),
-            instant + remaining,
-            deadline,
-            move || {
-                let (client, body, receiver, frozen) = (
-                    client.clone(),
-                    body.clone(),
-                    receiver.clone(),
-                    frozen.clone(),
-                );
-                async move {
-                    let _frozen = frozen;
-                    reconcile_before(&client, &body, &receiver, deadline).await
-                }
-            },
-        )
-        .await?;
-    ensure!(
-        outcome == PublicationOutcome::Published,
-        "Source V2 publication deadline; original operation may remain pending"
+    // The pull protocol has no all-bytes-sent boundary before exact publication.
+    timed_stage("transfer_and_publication", json, build_logs, async {
+        let outcome = provider
+            .publish_resume_with_reconciliation(
+                TransferTarget {
+                    endpoint_id: admitted.receiver_endpoint_id.clone(),
+                    direct_addresses: addresses,
+                    operation_id,
+                    session_id: admitted.receiver_session_id,
+                    manifest_blake3: verified.manifest_blake3().into(),
+                },
+                grant.clone(),
+                instant + remaining,
+                deadline,
+                move || {
+                    let (client, body, receiver, frozen) = (
+                        client.clone(),
+                        body.clone(),
+                        receiver.clone(),
+                        frozen.clone(),
+                    );
+                    async move {
+                        let _frozen = frozen;
+                        reconcile_before(&client, &body, &receiver, deadline).await
+                    }
+                },
+            )
+            .await?;
+        ensure!(
+            outcome == PublicationOutcome::Published,
+            "Source V2 publication deadline; original operation may remain pending"
+        );
+        Ok(())
+    })
+    .await
+}
+
+async fn timed_stage<T>(
+    stage: &'static str,
+    json: bool,
+    build_logs: Option<&BuildLogEmitter>,
+    work: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<T> {
+    let started = tokio::time::Instant::now();
+    emit_stage(stage, "started", 0, json, build_logs);
+    let result = work.await;
+    emit_stage(
+        stage,
+        if result.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        },
+        started.elapsed().as_millis(),
+        json,
+        build_logs,
     );
-    Ok(())
+    result
+}
+
+fn emit_stage(
+    stage: &str,
+    event: &str,
+    elapsed_ms: u128,
+    json: bool,
+    build_logs: Option<&BuildLogEmitter>,
+) {
+    let message = format!("Source V2 {stage} {event} ({elapsed_ms} ms)");
+    if json {
+        output::log_info_structured(
+            "deploy",
+            &message,
+            &serde_json::json!({
+                "sourcePublication": {"stage": stage, "event": event, "elapsedMs": elapsed_ms}
+            }),
+        );
+    } else {
+        output::status(false, "~", &message, output::Phase::Deploy);
+    }
+    if let Some(emitter) = build_logs {
+        emitter.info(BuildLogPhase::Upload, &message);
+    }
 }
 
 async fn reconcile_before(

@@ -57,6 +57,33 @@ fn ordinary_deploy_uses_the_installed_v2_profile_without_environment_overrides()
         String::from_utf8_lossy(&result.stderr)
     );
     assert_eq!(super::stdout_json(&result)["status"], "live");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    let timings: Vec<serde_json::Value> = stderr
+        .lines()
+        .filter_map(|line| line.strip_prefix('\u{1e}'))
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter_map(|frame| {
+            frame["details"]["sourcePublication"]
+                .as_object()
+                .cloned()
+                .map(serde_json::Value::Object)
+        })
+        .collect();
+    assert_eq!(timings.len(), 4, "{stderr}");
+    for (events, stage) in timings
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip(["packaging", "admission"])
+    {
+        assert_eq!(events[0]["stage"], stage);
+        assert_eq!(events[0]["event"], "started");
+        assert_eq!(events[1]["stage"], stage);
+        assert_eq!(events[1]["event"], "completed");
+        assert!(events[1]["elapsedMs"].is_u64());
+    }
+    assert!(stderr.contains("Source V2 publication confirmed by authenticated admission"));
+    assert!(!stderr.contains("transfer_and_publication completed"));
     let requests = requests.lock().unwrap();
     assert!(requests.contains(&format!(
         "POST /v1/deployments/{DEPLOYMENT_ID}/source-v2/metadata"

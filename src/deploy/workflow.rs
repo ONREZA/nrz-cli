@@ -593,6 +593,9 @@ async fn run_mode(
             },
             &mut source_registered,
             json && admitted_id.is_none(),
+            build_log_session
+                .as_ref()
+                .and_then(BuildLogSession::emitter),
         )
         .await?;
         // Selected local sets publish every component before their shared activation.

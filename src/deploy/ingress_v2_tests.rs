@@ -348,3 +348,102 @@ async fn authenticated_active_retries_transient_observation_before_same_operatio
     assert!(requests.iter().all(|request| request == &expected));
     server.abort();
 }
+
+#[tokio::test]
+async fn publication_timing_reports_retry_and_failure_without_polluting_stdout() {
+    use axum::{Json, Router, http::StatusCode, routing::post};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    const CHILD: &str = "NRZ_TEST_PUBLICATION_TIMING";
+    if let Ok(mode) = std::env::var(CHILD) {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let attempts = requests.clone();
+        let retry = mode == "retry";
+        let failure = mode == "failure";
+        let app = Router::new().route("/v1/deployments/{id}/static-source-v2/admit", post(move || {
+            let request = attempts.fetch_add(1, Ordering::SeqCst);
+            async move {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                if retry && request == 0 {
+                    (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"code":"SERVICE_UNAVAILABLE","message":"retry fixture-secret","retryAfterSeconds":0})))
+                } else if failure {
+                    (StatusCode::BAD_REQUEST, Json(serde_json::json!({"code":"VALIDATION_ERROR","message":"failure fixture-secret"})))
+                } else {
+                    (StatusCode::OK, Json(serde_json::to_value(nrz_api::Admit200Response::default()).unwrap()))
+                }
+            }
+        }));
+        let (client, server) = crate::test_support::serve_api(app).await;
+        let body = admission_body();
+        let mut protected = false;
+        let result = timed_stage(
+            "admission",
+            mode != "human",
+            None,
+            admit(
+                &client,
+                &body.deployment_id.to_string(),
+                &body,
+                &mut protected,
+            ),
+        )
+        .await;
+        output::json_output(
+            &serde_json::json!({"ok":result.is_ok(),"requests":requests.load(Ordering::SeqCst)}),
+        );
+        server.abort();
+        return;
+    }
+    for mode in ["success", "retry", "failure", "human"] {
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "deploy::ingress_v2::tests::publication_timing_reports_retry_and_failure_without_polluting_stdout", "--nocapture", "--quiet"])
+            .env(CHILD, mode)
+            .output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let stdout = String::from_utf8(result.stdout).unwrap();
+        let terminal: Vec<serde_json::Value> = stdout
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        assert_eq!(terminal.len(), 1, "{stdout}");
+        assert_eq!(
+            terminal[0],
+            serde_json::json!({"ok":mode != "failure","requests":if mode == "retry" {2} else {1}})
+        );
+        let stderr = String::from_utf8(result.stderr).unwrap();
+        assert!(!stderr.contains("fixture-secret"));
+        if mode == "human" {
+            assert!(stderr.contains("Source V2 admission started"));
+            assert!(stderr.contains("Source V2 admission completed"));
+            assert!(!stderr.contains(output::FRAME_SENTINEL));
+            continue;
+        }
+        let events: Vec<serde_json::Value> = stderr
+            .lines()
+            .filter_map(|line| line.strip_prefix(output::FRAME_SENTINEL))
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(events.len(), 2, "{stderr}");
+        assert_eq!(
+            events[0]["details"]["sourcePublication"],
+            serde_json::json!({"stage":"admission","event":"started","elapsedMs":0})
+        );
+        let finished = &events[1]["details"]["sourcePublication"];
+        assert_eq!(finished["stage"], "admission");
+        assert_eq!(
+            finished["event"],
+            if mode == "failure" {
+                "failed"
+            } else {
+                "completed"
+            }
+        );
+        assert!(finished["elapsedMs"].as_u64().unwrap() >= 25);
+    }
+}
