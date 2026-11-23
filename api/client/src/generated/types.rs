@@ -14051,9 +14051,39 @@ pub struct DatabaseRequestBody {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-/// Creates a managed PostgreSQL database and returns the local database row plus the generated password.
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1kaikiDatabasesRequestHeader {
+    #[validate(regex(
+        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_PUBLISH_SERVICES_REQUEST_HEADER_IDEMPOTENCY_KEY"
+    ))]
+    pub idempotency_key: Option<String>,
+}
+impl core::convert::TryFrom<&PostV1kaikiDatabasesRequestHeader> for http::HeaderMap {
+    type Error = http::header::InvalidHeaderValue;
+    fn try_from(
+        headers: &PostV1kaikiDatabasesRequestHeader,
+    ) -> core::result::Result<Self, Self::Error> {
+        let mut map = http::HeaderMap::with_capacity(1usize);
+        if let Some(value) = &headers.idempotency_key {
+            let header_value = http::HeaderValue::try_from(value)?;
+            map.insert(IDEMPOTENCY_KEY, header_value);
+        }
+        Ok(map)
+    }
+}
+impl core::convert::TryFrom<PostV1kaikiDatabasesRequestHeader> for http::HeaderMap {
+    type Error = http::header::InvalidHeaderValue;
+    fn try_from(
+        headers: PostV1kaikiDatabasesRequestHeader,
+    ) -> core::result::Result<Self, Self::Error> {
+        http::HeaderMap::try_from(&headers)
+    }
+}
+/// Creates a managed PostgreSQL database and returns its generated password. V2 requires an Idempotency-Key UUIDv7 header: keep one key for retries of the same attempt; a changed request with that key returns a conflict. Legacy V1 preserves its existing behavior and ignores the optional key.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct PostV1kaikiDatabasesRequest {
+    #[validate(nested)]
+    pub header: PostV1kaikiDatabasesRequestHeader,
     #[validate(nested)]
     pub body: DatabaseRequestBody,
 }
@@ -14068,6 +14098,13 @@ impl PostV1kaikiDatabasesRequest {
                 oas3_gen_support::Diagnostics::<Database200Response2>::json_with_diagnostics(req)
                     .await?;
             return Ok(PostV1kaikiDatabasesResponse::Ok(data));
+        }
+        if status == http::StatusCode::ACCEPTED {
+            let data = oas3_gen_support::Diagnostics::<
+                Database200Response2Object2,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(PostV1kaikiDatabasesResponse::Accepted(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
@@ -14148,6 +14185,8 @@ impl PostV1kaikiDatabasesRequest {
 pub enum PostV1kaikiDatabasesResponse {
     ///200: Response for status 200
     Ok(Database200Response2),
+    ///202: Response for status 202
+    Accepted(Database200Response2Object2),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -14314,7 +14353,7 @@ pub enum GetV1kaikiDatabasesByIdResponse {
 pub struct DeleteV1kaikiDatabasesByIdRequestPath {
     pub id: uuid::Uuid,
 }
-/// Deletes a managed PostgreSQL database and waits for the provider terminal result.
+/// V2 returns a durable accepted operation. V1 waits for the provider terminal result.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct DeleteV1kaikiDatabasesByIdRequest {
     pub path: DeleteV1kaikiDatabasesByIdRequestPath,
@@ -14327,8 +14366,16 @@ impl DeleteV1kaikiDatabasesByIdRequest {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data =
-                oas3_gen_support::Diagnostics::<StatusResponse>::json_with_diagnostics(req).await?;
+                oas3_gen_support::Diagnostics::<Database200Response4>::json_with_diagnostics(req)
+                    .await?;
             return Ok(DeleteV1kaikiDatabasesByIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::ACCEPTED {
+            let data = oas3_gen_support::Diagnostics::<
+                Database200Response2ObjectOperation,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(DeleteV1kaikiDatabasesByIdResponse::Accepted(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
@@ -14412,7 +14459,9 @@ impl DeleteV1kaikiDatabasesByIdRequest {
 #[derive(Debug, Clone)]
 pub enum DeleteV1kaikiDatabasesByIdResponse {
     ///200: Response for status 200
-    Ok(StatusResponse),
+    Ok(Database200Response4),
+    ///202: Response for status 202
+    Accepted(Database200Response2ObjectOperation),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -14480,9 +14529,15 @@ impl PatchV1kaikiDatabasesByIdRequest {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data =
-                oas3_gen_support::Diagnostics::<Database200Response4>::json_with_diagnostics(req)
+                oas3_gen_support::Diagnostics::<Database200Response5>::json_with_diagnostics(req)
                     .await?;
             return Ok(PatchV1kaikiDatabasesByIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::ACCEPTED {
+            let data =
+                oas3_gen_support::Diagnostics::<Database200Response5>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PatchV1kaikiDatabasesByIdResponse::Accepted(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
@@ -14562,7 +14617,9 @@ impl PatchV1kaikiDatabasesByIdRequest {
 #[derive(Debug, Clone)]
 pub enum PatchV1kaikiDatabasesByIdResponse {
     ///200: Response for status 200
-    Ok(Database200Response4),
+    Ok(Database200Response5),
+    ///202: Response for status 202
+    Accepted(Database200Response5),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -14614,6 +14671,13 @@ impl PostV1kaikiDatabasesByIdStartRequest {
                 oas3_gen_support::Diagnostics::<Start200Response>::json_with_diagnostics(req)
                     .await?;
             return Ok(PostV1kaikiDatabasesByIdStopResponse::Ok(data));
+        }
+        if status == http::StatusCode::ACCEPTED {
+            let data = oas3_gen_support::Diagnostics::<
+                Database200Response2ObjectOperation,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(PostV1kaikiDatabasesByIdStopResponse::Accepted(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
@@ -14716,6 +14780,13 @@ impl PostV1kaikiDatabasesByIdStopRequest {
                     .await?;
             return Ok(PostV1kaikiDatabasesByIdStopResponse::Ok(data));
         }
+        if status == http::StatusCode::ACCEPTED {
+            let data = oas3_gen_support::Diagnostics::<
+                Database200Response2ObjectOperation,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(PostV1kaikiDatabasesByIdStopResponse::Accepted(data));
+        }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
@@ -14801,6 +14872,8 @@ impl PostV1kaikiDatabasesByIdStopRequest {
 pub enum PostV1kaikiDatabasesByIdStopResponse {
     ///200: Response for status 200
     Ok(Start200Response),
+    ///202: Response for status 202
+    Accepted(Database200Response2ObjectOperation),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -15138,10 +15211,40 @@ pub struct BranchRequestBody2 {
 pub struct PostV1kaikiDatabasesByIdBranchesRequestPath {
     pub id: uuid::Uuid,
 }
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1kaikiDatabasesByIdBranchesRequestHeader {
+    #[validate(regex(
+        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_PUBLISH_SERVICES_REQUEST_HEADER_IDEMPOTENCY_KEY"
+    ))]
+    pub idempotency_key: Option<String>,
+}
+impl core::convert::TryFrom<&PostV1kaikiDatabasesByIdBranchesRequestHeader> for http::HeaderMap {
+    type Error = http::header::InvalidHeaderValue;
+    fn try_from(
+        headers: &PostV1kaikiDatabasesByIdBranchesRequestHeader,
+    ) -> core::result::Result<Self, Self::Error> {
+        let mut map = http::HeaderMap::with_capacity(1usize);
+        if let Some(value) = &headers.idempotency_key {
+            let header_value = http::HeaderValue::try_from(value)?;
+            map.insert(IDEMPOTENCY_KEY, header_value);
+        }
+        Ok(map)
+    }
+}
+impl core::convert::TryFrom<PostV1kaikiDatabasesByIdBranchesRequestHeader> for http::HeaderMap {
+    type Error = http::header::InvalidHeaderValue;
+    fn try_from(
+        headers: PostV1kaikiDatabasesByIdBranchesRequestHeader,
+    ) -> core::result::Result<Self, Self::Error> {
+        http::HeaderMap::try_from(&headers)
+    }
+}
 /// Creates a managed PostgreSQL branch and persists local branch metadata.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct PostV1kaikiDatabasesByIdBranchesRequest {
     pub path: PostV1kaikiDatabasesByIdBranchesRequestPath,
+    #[validate(nested)]
+    pub header: PostV1kaikiDatabasesByIdBranchesRequestHeader,
     #[validate(nested)]
     pub body: BranchRequestBody2,
 }
@@ -15156,6 +15259,13 @@ impl PostV1kaikiDatabasesByIdBranchesRequest {
                 oas3_gen_support::Diagnostics::<Branch200Response3>::json_with_diagnostics(req)
                     .await?;
             return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Ok(data));
+        }
+        if status == http::StatusCode::ACCEPTED {
+            let data = oas3_gen_support::Diagnostics::<
+                Database200Response2ObjectOperation,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Accepted(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
@@ -15246,6 +15356,8 @@ impl PostV1kaikiDatabasesByIdBranchesRequest {
 pub enum PostV1kaikiDatabasesByIdBranchesResponse {
     ///200: Response for status 200
     Ok(Branch200Response3),
+    ///202: Response for status 202
+    Accepted(Database200Response2ObjectOperation),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -15293,97 +15405,135 @@ impl GetV1kaikiDatabasesByIdBranchesByBranchIdRequest {
     /// Parse the HTTP response into the response enum.
     pub async fn parse_response(
         req: reqwest::Response,
-    ) -> anyhow::Result<PostV1kaikiDatabasesByIdBranchesResponse> {
+    ) -> anyhow::Result<GetV1kaikiDatabasesByIdBranchesByBranchIdResponse> {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data =
-                oas3_gen_support::Diagnostics::<Branch200Response3>::json_with_diagnostics(req)
-                    .await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Ok(data));
+                oas3_gen_support::Diagnostics::<Branch200Response3Object>::json_with_diagnostics(
+                    req,
+                )
+                .await?;
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::Ok(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::BadRequest(data));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::BadRequest(data));
         }
         if status == http::StatusCode::UNAUTHORIZED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Unauthorized(data));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::Unauthorized(data));
         }
         if status == http::StatusCode::PAYMENT_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::PaymentRequired(
-                data,
-            ));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::PaymentRequired(data));
         }
         if status == http::StatusCode::FORBIDDEN {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Forbidden(data));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::Forbidden(data));
         }
         if status == http::StatusCode::NOT_FOUND {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::NotFound(data));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::NotFound(
+                data,
+            ));
         }
         if status == http::StatusCode::REQUEST_TIMEOUT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::RequestTimeout(
-                data,
-            ));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::RequestTimeout(data));
         }
         if status == http::StatusCode::CONFLICT {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Conflict(data));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::Conflict(
+                data,
+            ));
         }
         if status == http::StatusCode::GONE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Gone(data));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::Gone(
+                data,
+            ));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::ContentTooLarge(
-                data,
-            ));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::ContentTooLarge(data));
         }
         if status == http::StatusCode::UNPROCESSABLE_ENTITY {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::UnprocessableEntity(data));
+            return Ok(
+                GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::UnprocessableEntity(data),
+            );
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::UpgradeRequired(
-                data,
-            ));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::UpgradeRequired(data));
         }
         if status == http::StatusCode::TOO_MANY_REQUESTS {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::TooManyRequests(
-                data,
-            ));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::TooManyRequests(data));
         }
         if status == http::StatusCode::INTERNAL_SERVER_ERROR {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::InternalServerError(data));
+            return Ok(
+                GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::InternalServerError(data),
+            );
         }
         if status == http::StatusCode::SERVICE_UNAVAILABLE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
-            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::ServiceUnavailable(data));
+            return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::ServiceUnavailable(data));
         }
         let _ = req.bytes().await?;
-        return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Unknown);
+        return Ok(GetV1kaikiDatabasesByIdBranchesByBranchIdResponse::Unknown);
     }
+}
+/// Response types for getV1KaikiDatabasesByIdBranchesByBranchId
+#[derive(Debug, Clone)]
+pub enum GetV1kaikiDatabasesByIdBranchesByBranchIdResponse {
+    ///200: Response for status 200
+    Ok(Branch200Response3Object),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
 }
 #[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
 pub struct DeleteV1kaikiDatabasesByIdBranchesByBranchIdRequestPath {
@@ -15405,8 +15555,16 @@ impl DeleteV1kaikiDatabasesByIdBranchesByBranchIdRequest {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data =
-                oas3_gen_support::Diagnostics::<StatusResponse>::json_with_diagnostics(req).await?;
+                oas3_gen_support::Diagnostics::<Database200Response4>::json_with_diagnostics(req)
+                    .await?;
             return Ok(DeleteV1kaikiDatabasesByIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::ACCEPTED {
+            let data = oas3_gen_support::Diagnostics::<
+                Database200Response2ObjectOperation,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(DeleteV1kaikiDatabasesByIdResponse::Accepted(data));
         }
         if status == http::StatusCode::BAD_REQUEST {
             let data =
@@ -18889,6 +19047,157 @@ impl DeleteV1projectsByIdServicesByServiceIdConfigByKeyRequest {
         let _ = req.bytes().await?;
         return Ok(PutV1projectsByIdServicesByServiceIdConfigResponse::Unknown);
     }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1kaikiDatabasesByIdOperationsByOperationIdRequestPath {
+    pub id: uuid::Uuid,
+    pub operation_id: uuid::Uuid,
+}
+/// V2 operation receipts remain observable after database or branch deletion, subject to current command authority. Results never contain credentials.
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1kaikiDatabasesByIdOperationsByOperationIdRequest {
+    pub path: GetV1kaikiDatabasesByIdOperationsByOperationIdRequestPath,
+}
+impl GetV1kaikiDatabasesByIdOperationsByOperationIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1kaikiDatabasesByIdOperationsByOperationIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<
+                Database200Response2ObjectOperation,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::Ok(
+                data,
+            ));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::PaymentRequired(data),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::RequestTimeout(data),
+            );
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::ContentTooLarge(data),
+            );
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::UnprocessableEntity(data),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::UpgradeRequired(data),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::TooManyRequests(data),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::InternalServerError(data),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::ServiceUnavailable(data),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::Unknown);
+    }
+}
+/// Response types for getV1KaikiDatabasesByIdOperationsByOperationId
+#[derive(Debug, Clone)]
+pub enum GetV1kaikiDatabasesByIdOperationsByOperationIdResponse {
+    ///200: Response for status 200
+    Ok(Database200Response2ObjectOperation),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(deny_unknown_fields)]
@@ -28701,6 +29010,12 @@ pub struct Database200ResponseDatumRuntime {
     #[serialize_always]
     #[validate(nested)]
     pub capacity: Option<Database200ResponseDatumRuntimeCapacity>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "endpointObservedState"
+    )]
+    pub endpoint_observed_state: Option<Option<Database200ResponseDatumEndpointObservedState>>,
     #[validate(nested)]
     pub operations: Vec<Database200ResponseDatumRuntimeOperation>,
     pub unavailable: bool,
@@ -28714,6 +29029,8 @@ pub struct Database200ResponseDatumRuntime {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct Database200ResponseDatum {
+    #[serde(rename = "pendingReason")]
+    pub pending_reason: Option<String>,
     pub id: uuid::Uuid,
     #[serde(deserialize_with = "Option::deserialize", rename = "productId")]
     #[serialize_always]
@@ -28852,11 +29169,80 @@ pub struct Database200Response {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Database200Response2ObjectOperationOperationType {
+    #[serde(rename = "database.create")]
+    #[default]
+    DatabaseCreate,
+    #[serde(rename = "database.delete")]
+    DatabaseDelete,
+    #[serde(rename = "branch.create")]
+    BranchCreate,
+    #[serde(rename = "branch.restore")]
+    BranchRestore,
+    #[serde(rename = "branch.delete")]
+    BranchDelete,
+    #[serde(rename = "endpoint.start")]
+    EndpointStart,
+    #[serde(rename = "endpoint.stop")]
+    EndpointStop,
+    #[serde(rename = "endpoint.resize")]
+    EndpointResize,
+}
+impl core::fmt::Display for Database200Response2ObjectOperationOperationType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::DatabaseCreate => write!(f, "database.create"),
+            Self::DatabaseDelete => write!(f, "database.delete"),
+            Self::BranchCreate => write!(f, "branch.create"),
+            Self::BranchRestore => write!(f, "branch.restore"),
+            Self::BranchDelete => write!(f, "branch.delete"),
+            Self::EndpointStart => write!(f, "endpoint.start"),
+            Self::EndpointStop => write!(f, "endpoint.stop"),
+            Self::EndpointResize => write!(f, "endpoint.resize"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200Response2ObjectOperationResult {
+    #[serde(rename = "databaseId")]
+    pub database_id: uuid::Uuid,
+    #[serde(rename = "branchId")]
+    pub branch_id: Option<String>,
+    #[serde(rename = "endpointId")]
+    pub endpoint_id: Option<String>,
+    #[serde(rename = "resolvedLsn")]
+    pub resolved_lsn: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200Response2ObjectOperation {
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    #[serde(rename = "operationType")]
+    pub operation_type: Database200Response2ObjectOperationOperationType,
+    pub status: Database200ResponseDatumRuntimeOperationStatus,
+    pub result: Database200Response2ObjectOperationResult,
+    #[serde(rename = "errorCode")]
+    pub error_code: Option<String>,
+    #[serde(rename = "pendingReason")]
+    pub pending_reason: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct Database200Response2 {
+pub struct Database200Response2Object {
+    pub operation: Option<Database200Response2ObjectOperation>,
     pub id: uuid::Uuid,
     #[serde(deserialize_with = "Option::deserialize", rename = "productId")]
     #[serialize_always]
@@ -28913,10 +29299,38 @@ pub struct Database200Response2 {
     #[serialize_always]
     pub suspend_timeout_seconds: Option<i64>,
     pub password: String,
+    #[serde(rename = "pendingCuSize")]
+    pub pending_cu_size: Option<f64>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Database200Response2Object2 {
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    #[serde(rename = "operationType")]
+    pub operation_type: Database200Response2ObjectOperationOperationType,
+    pub status: Database200ResponseDatumRuntimeOperationStatus,
+    pub result: Database200Response2ObjectOperationResult,
+    #[serde(rename = "errorCode")]
+    pub error_code: Option<String>,
+    #[serde(rename = "pendingReason")]
+    pub pending_reason: Option<String>,
+    pub password: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Database200Response2 {
+    #[default]
+    Object(Database200Response2Object),
+    Object2(Database200Response2Object2),
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Database200Response3KaikiStatus {
@@ -28948,6 +29362,8 @@ impl core::fmt::Display for Database200Response3KaikiStatus {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct Database200Response3 {
+    #[serde(rename = "pendingReason")]
+    pub pending_reason: Option<String>,
     pub id: uuid::Uuid,
     #[serde(deserialize_with = "Option::deserialize", rename = "productId")]
     #[serialize_always]
@@ -29000,6 +29416,32 @@ pub struct Database200Response3 {
     #[serde(rename = "projectAttachments")]
     pub project_attachments: Vec<Database200ResponseDatumProjectAttachment>,
     pub permissions: Vec<String>,
+    #[serde(rename = "sqlConsoleAvailable")]
+    pub sql_console_available: Option<bool>,
+    #[serde(rename = "restoreAvailable")]
+    pub restore_available: Option<bool>,
+    #[serde(rename = "branchDeleteAvailable")]
+    pub branch_delete_available: Option<bool>,
+    #[serde(rename = "restorePending")]
+    pub restore_pending: Option<bool>,
+    #[serde(rename = "runtimeDetailsAvailable")]
+    pub runtime_details_available: Option<bool>,
+    #[serde(rename = "powerAvailable")]
+    pub power_available: Option<bool>,
+    #[serde(rename = "resizeAvailable")]
+    pub resize_available: Option<bool>,
+    #[serde(rename = "autoscaleAvailable")]
+    pub autoscale_available: Option<bool>,
+    #[serde(rename = "pendingCuSize")]
+    pub pending_cu_size: Option<f64>,
+    #[serde(rename = "deleteAvailable")]
+    pub delete_available: Option<bool>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "endpointObservedState"
+    )]
+    pub endpoint_observed_state: Option<Option<Database200ResponseDatumEndpointObservedState>>,
     #[serde(rename = "kaikiStatus")]
     pub kaiki_status: Option<Database200Response3KaikiStatus>,
     #[serde(
@@ -29060,9 +29502,9 @@ pub struct Database200Response3 {
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct StatusResponse {
-    #[serde(deserialize_with = "StatusResponse::deserialize_const_status")]
-    #[serde(serialize_with = "StatusResponse::serialize_const_status")]
+pub struct Database200Response4Status {
+    #[serde(deserialize_with = "Database200Response4Status::deserialize_const_status")]
+    #[serde(serialize_with = "Database200Response4Status::serialize_const_status")]
     #[default("deleted".to_string())]
     pub status: String,
     /// Additional properties not defined in the schema.
@@ -29070,7 +29512,7 @@ pub struct StatusResponse {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-impl StatusResponse {
+impl Database200Response4Status {
     #[allow(
         clippy::float_cmp,
         reason = "JSON Schema constants require exact equality"
@@ -29111,11 +29553,27 @@ impl StatusResponse {
         serde::Serialize::serialize(value, serializer)
     }
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Database200Response4 {
+    #[default]
+    Status(Database200Response4Status),
+    Object(Database200Response2ObjectOperation),
+}
+impl Database200Response4 {
+    pub fn status(status: String) -> Self {
+        Self::Status(Database200Response4Status {
+            status,
+            ..Default::default()
+        })
+    }
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct Database200Response4 {
+pub struct Database200Response5 {
+    pub operation: Option<Database200Response2ObjectOperation>,
     pub id: uuid::Uuid,
     #[serde(deserialize_with = "Option::deserialize", rename = "productId")]
     #[serialize_always]
@@ -29172,6 +29630,8 @@ pub struct Database200Response4 {
     #[serialize_always]
     pub suspend_timeout_seconds: Option<i64>,
     pub password: Option<String>,
+    #[serde(rename = "pendingCuSize")]
+    pub pending_cu_size: Option<f64>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -29179,7 +29639,7 @@ pub struct Database200Response4 {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Start200ResponseResource {
+pub struct Start200ResponseObjectResource {
     #[serde(default, with = "serde_with::rust::double_option")]
     pub resource_generation: Option<Option<i64>>,
     #[serde(default, with = "serde_with::rust::double_option")]
@@ -29191,15 +29651,22 @@ pub struct Start200ResponseResource {
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Start200Response {
+pub struct Start200ResponseObject {
     pub operation_id: uuid::Uuid,
     pub operation_type: String,
-    pub resource: Start200ResponseResource,
+    pub resource: Start200ResponseObjectResource,
     pub status: Database200ResponseDatumRuntimeOperationStatus,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Start200Response {
+    #[default]
+    Object(Start200ResponseObject),
+    Object2(Database200Response2ObjectOperation),
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Connection200ResponseConnectionTargetsDirectMode {
@@ -29269,7 +29736,7 @@ pub type Branch200Response2 = Vec<ManagedDatabaseBranchListItem>;
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct Branch200Response3 {
+pub struct Branch200Response3Object {
     #[serde(default, with = "serde_with::rust::double_option")]
     pub ancestor_lsn: Option<Option<String>>,
     #[serde(default, with = "serde_with::rust::double_option")]
@@ -29320,6 +29787,13 @@ pub struct Branch200Response3 {
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Branch200Response3 {
+    #[default]
+    Object(Branch200Response3Object),
+    Object2(Database200Response2ObjectOperation),
 }
 #[serde_with::skip_serializing_none]
 #[derive(

@@ -29,6 +29,22 @@ pub enum DbCommand {
         /// Wait for database to become active before returning
         #[arg(long)]
         wait: bool,
+
+        /// UUIDv7 to reuse when retrying this same creation attempt
+        #[arg(long, value_parser = parse_idempotency_key)]
+        idempotency_key: Option<uuid::Uuid>,
+    },
+
+    /// Read a durable v2 operation, including after database or branch deletion
+    Operation {
+        /// Operation ID returned by the original command
+        operation_id: uuid::Uuid,
+        /// Exact database ID (or configured database); use the ID after deletion
+        #[arg(long)]
+        database: Option<String>,
+        /// Poll this receipt until the operation finishes
+        #[arg(long)]
+        wait: bool,
     },
 
     /// Show database details
@@ -124,6 +140,9 @@ pub enum BranchesCommand {
     Create {
         /// Branch name
         name: String,
+        /// UUIDv7 to reuse when retrying this same branch creation attempt
+        #[arg(long, value_parser = parse_idempotency_key)]
+        idempotency_key: Option<uuid::Uuid>,
     },
 
     /// Delete a branch
@@ -174,4 +193,14 @@ pub struct ConfigArgs {
     /// Auto-create preview branches for preview deployments
     #[arg(long)]
     pub preview_branches: Option<bool>,
+}
+
+fn parse_idempotency_key(value: &str) -> Result<uuid::Uuid, String> {
+    let id: uuid::Uuid = value
+        .parse()
+        .map_err(|_| "idempotency key must be a UUIDv7".to_string())?;
+    if id.get_version_num() != 7 || id.get_variant() != uuid::Variant::RFC4122 {
+        return Err("idempotency key must be a UUIDv7".to_string());
+    }
+    Ok(id)
 }

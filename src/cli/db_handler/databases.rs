@@ -61,15 +61,35 @@ pub(super) async fn cmd_create(
     name: Option<String>,
     cu_size: Option<f64>,
     wait: bool,
+    idempotency_key: Option<uuid::Uuid>,
 ) -> anyhow::Result<()> {
     output::status(json, "~", "Creating database...", output::Phase::Db);
 
     let body = wire::create_body(name, cu_size)?;
-    let created: CreateResponse = client
-        .create_database(body)
+    let key = idempotency_key.unwrap_or_else(uuid::Uuid::now_v7);
+    output::status(
+        json,
+        "~",
+        format!("Creation attempt: --idempotency-key {key}"),
+        output::Phase::Db,
+    );
+    let response = client
+        .create_database(body, key)
         .await
-        .context("failed to create database")?
-        .into();
+        .context("failed to create database")?;
+    let created: CreateResponse = match response {
+        nrz_api::Database200Response2::Object(value) => value.into(),
+        nrz_api::Database200Response2::Object2(value) => {
+            let mut operation = DatabaseOperation::created(value, key);
+            operation.verify_type(OperationType::DatabaseCreate)?;
+            operation.check_outcome()?;
+            if wait {
+                operation = wait_operation(client, operation).await?;
+            }
+            print_operation(&operation, json);
+            return Ok(());
+        }
+    };
 
     if wait {
         output::status(
@@ -198,10 +218,20 @@ pub(super) async fn cmd_delete(
         .delete_database(db_id)
         .await
         .context("failed to delete database")?;
-    anyhow::ensure!(
-        response.status == "deleted",
-        "database deletion was not accepted"
-    );
+    match response {
+        nrz_api::Database200Response4::Object(value) => {
+            let operation = DatabaseOperation::from(value);
+            operation.verify_database(db_id)?;
+            operation.verify_type(OperationType::DatabaseDelete)?;
+            operation.check_outcome()?;
+            print_operation(&operation, json);
+            return Ok(());
+        }
+        nrz_api::Database200Response4::Status(value) => anyhow::ensure!(
+            value.status == "deleted",
+            "database deletion was not accepted"
+        ),
+    }
 
     if json {
         output::json_output(&serde_json::json!({"deleted": db_id}));
@@ -228,10 +258,25 @@ pub(super) async fn cmd_start_stop(
     }
     .with_context(|| format!("failed to {action} database"))?;
 
+    let legacy = match resp {
+        nrz_api::Start200Response::Object(value) => value,
+        nrz_api::Start200Response::Object2(value) => {
+            let operation = DatabaseOperation::from(value);
+            operation.verify_database(db_id)?;
+            operation.verify_type(if action == "start" {
+                OperationType::EndpointStart
+            } else {
+                OperationType::EndpointStop
+            })?;
+            operation.check_outcome()?;
+            print_operation(&operation, json);
+            return Ok(());
+        }
+    };
     if json {
-        output::json_output(&resp);
+        output::json_output(&legacy);
     } else {
-        let status = resp.status;
+        let status = legacy.status;
         output::success(
             false,
             format!("Database {db_id}: {status}"),

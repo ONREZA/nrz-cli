@@ -1459,7 +1459,7 @@ impl PlatformClient {
     }
     /// Create managed database
     ///
-    /// Creates a managed PostgreSQL database and returns the local database row plus the generated password.
+    /// Creates a managed PostgreSQL database and returns its generated password. V2 requires an Idempotency-Key UUIDv7 header: keep one key for retries of the same attempt; a changed request with that key returns a conflict. Legacy V1 preserves its existing behavior and ignores the optional key.
     ///
     /// * Path: `POST /v1/kaiki/databases/`
     pub async fn post_v1kaiki_databases(
@@ -1474,7 +1474,15 @@ impl PlatformClient {
             .push("kaiki")
             .push("databases")
             .push("");
-        let response = self.client.post(url).json(&request.body).send().await?;
+        let response = self
+            .client
+            .post(url)
+            .headers(
+                http::HeaderMap::try_from(&request.header).context("building request headers")?,
+            )
+            .json(&request.body)
+            .send()
+            .await?;
         Ok(PostV1kaikiDatabasesRequest::parse_response(response).await?)
     }
     /// Get managed database
@@ -1499,7 +1507,7 @@ impl PlatformClient {
     }
     /// Delete managed database
     ///
-    /// Deletes a managed PostgreSQL database and waits for the provider terminal result.
+    /// V2 returns a durable accepted operation. V1 waits for the provider terminal result.
     ///
     /// * Path: `DELETE /v1/kaiki/databases/{id}`
     pub async fn delete_v1kaiki_databases_by_id(
@@ -1639,7 +1647,15 @@ impl PlatformClient {
             .push("databases")
             .push(&request.path.id.to_string())
             .push("branches");
-        let response = self.client.post(url).json(&request.body).send().await?;
+        let response = self
+            .client
+            .post(url)
+            .headers(
+                http::HeaderMap::try_from(&request.header).context("building request headers")?,
+            )
+            .json(&request.body)
+            .send()
+            .await?;
         Ok(PostV1kaikiDatabasesByIdBranchesRequest::parse_response(response).await?)
     }
     /// Get database branch
@@ -1650,7 +1666,7 @@ impl PlatformClient {
     pub async fn get_v1kaiki_databases_by_id_branches_by_branch_id(
         &self,
         request: GetV1kaikiDatabasesByIdBranchesByBranchIdRequest,
-    ) -> anyhow::Result<PostV1kaikiDatabasesByIdBranchesResponse> {
+    ) -> anyhow::Result<GetV1kaikiDatabasesByIdBranchesByBranchIdResponse> {
         request.validate().context("parameter validation")?;
         let mut url = self.base_url.clone();
         url.path_segments_mut()
@@ -2127,6 +2143,28 @@ impl PlatformClient {
             DeleteV1projectsByIdServicesByServiceIdConfigByKeyRequest::parse_response(response)
                 .await?,
         )
+    }
+    /// Read a durable native lifecycle operation
+    ///
+    /// V2 operation receipts remain observable after database or branch deletion, subject to current command authority. Results never contain credentials.
+    ///
+    /// * Path: `GET /v1/kaiki/databases/{id}/operations/{operationId}`
+    pub async fn get_v1kaiki_databases_by_id_operations_by_operation_id(
+        &self,
+        request: GetV1kaikiDatabasesByIdOperationsByOperationIdRequest,
+    ) -> anyhow::Result<GetV1kaikiDatabasesByIdOperationsByOperationIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kaiki")
+            .push("databases")
+            .push(&request.path.id.to_string())
+            .push("operations")
+            .push(&request.path.operation_id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1kaikiDatabasesByIdOperationsByOperationIdRequest::parse_response(response).await?)
     }
 }
 /// Typed operation transport without consuming response status, headers, or body.
@@ -3443,7 +3481,7 @@ impl PlatformClientRaw {
     }
     /// Create managed database
     ///
-    /// Creates a managed PostgreSQL database and returns the local database row plus the generated password.
+    /// Creates a managed PostgreSQL database and returns its generated password. V2 requires an Idempotency-Key UUIDv7 header: keep one key for retries of the same attempt; a changed request with that key returns a conflict. Legacy V1 preserves its existing behavior and ignores the optional key.
     ///
     /// * Path: `POST /v1/kaiki/databases/`
     pub async fn post_v1kaiki_databases(
@@ -3458,7 +3496,15 @@ impl PlatformClientRaw {
             .push("kaiki")
             .push("databases")
             .push("");
-        let response = self.client.post(url).json(&request.body).send().await?;
+        let response = self
+            .client
+            .post(url)
+            .headers(
+                http::HeaderMap::try_from(&request.header).context("building request headers")?,
+            )
+            .json(&request.body)
+            .send()
+            .await?;
         Ok(response)
     }
     /// Get managed database
@@ -3483,7 +3529,7 @@ impl PlatformClientRaw {
     }
     /// Delete managed database
     ///
-    /// Deletes a managed PostgreSQL database and waits for the provider terminal result.
+    /// V2 returns a durable accepted operation. V1 waits for the provider terminal result.
     ///
     /// * Path: `DELETE /v1/kaiki/databases/{id}`
     pub async fn delete_v1kaiki_databases_by_id(
@@ -3623,7 +3669,15 @@ impl PlatformClientRaw {
             .push("databases")
             .push(&request.path.id.to_string())
             .push("branches");
-        let response = self.client.post(url).json(&request.body).send().await?;
+        let response = self
+            .client
+            .post(url)
+            .headers(
+                http::HeaderMap::try_from(&request.header).context("building request headers")?,
+            )
+            .json(&request.body)
+            .send()
+            .await?;
         Ok(response)
     }
     /// Get database branch
@@ -4092,6 +4146,28 @@ impl PlatformClientRaw {
             .push("config")
             .push(&request.path.key.to_string());
         let response = self.client.delete(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Read a durable native lifecycle operation
+    ///
+    /// V2 operation receipts remain observable after database or branch deletion, subject to current command authority. Results never contain credentials.
+    ///
+    /// * Path: `GET /v1/kaiki/databases/{id}/operations/{operationId}`
+    pub async fn get_v1kaiki_databases_by_id_operations_by_operation_id(
+        &self,
+        request: GetV1kaikiDatabasesByIdOperationsByOperationIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("kaiki")
+            .push("databases")
+            .push(&request.path.id.to_string())
+            .push("operations")
+            .push(&request.path.operation_id.to_string());
+        let response = self.client.get(url).send().await?;
         Ok(response)
     }
 }

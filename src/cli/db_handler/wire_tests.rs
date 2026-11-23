@@ -4,6 +4,7 @@ use axum::{
     Json, Router,
     extract::{Request, State},
 };
+use clap::Parser;
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
@@ -14,6 +15,8 @@ const DB: &str = "11111111-1111-4111-8111-111111111111";
 const PROJECT: &str = "22222222-2222-4222-8222-222222222222";
 
 struct Exchange {
+    status: u16,
+    key: Option<&'static str>,
     method: &'static str,
     path: String,
     body: Option<Value>,
@@ -38,6 +41,22 @@ async fn serve(
                     .expect("unexpected API request");
                 assert_eq!(request.method().as_str(), exchange.method);
                 assert_eq!(request.uri().to_string(), exchange.path);
+                if let Some(key) = exchange.key {
+                    assert_eq!(request.headers().get("idempotency-key").unwrap(), key);
+                } else if exchange.method == "POST"
+                    && (exchange.path.ends_with("/databases/")
+                        || exchange.path.ends_with("/branches"))
+                {
+                    let key: uuid::Uuid = request
+                        .headers()
+                        .get("idempotency-key")
+                        .expect("Create and Fork need a key")
+                        .to_str()
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                    assert_eq!(key.get_version_num(), 7);
+                }
                 let body = axum::body::to_bytes(request.into_body(), 1024 * 1024)
                     .await
                     .unwrap();
@@ -47,7 +66,10 @@ async fn serve(
                     }
                     None => assert!(body.is_empty()),
                 }
-                Json(exchange.response)
+                (
+                    axum::http::StatusCode::from_u16(exchange.status).unwrap(),
+                    Json(exchange.response),
+                )
             },
         )
         .with_state(Arc::clone(&pending));
@@ -70,7 +92,7 @@ fn connection() -> Value {
 
 #[tokio::test]
 async fn create_database_keeps_standalone_ownership_without_implicit_attachment() {
-    let created = nrz_api::Database200Response2 {
+    let created = nrz_api::Database200Response2Object {
         id: DB.parse().unwrap(),
         product_id: Some(PROJECT.parse().unwrap()),
         db_name: "primary".into(),
@@ -78,15 +100,24 @@ async fn create_database_keeps_standalone_ownership_without_implicit_attachment(
         ..Default::default()
     };
     let (client, pending, server) = serve(vec![Exchange {
+        status: 200,
+        key: None,
         method: "POST",
         path: "/v1/kaiki/databases/".into(),
         body: Some(json!({"dbName":"primary","cuSize":0.5})),
         response: serde_json::to_value(created.clone()).unwrap(),
     }])
     .await;
-    cmd_create(&client, true, Some("primary".into()), Some(0.5), false)
-        .await
-        .unwrap();
+    cmd_create(
+        &client,
+        true,
+        Some("primary".into()),
+        Some(0.5),
+        false,
+        None,
+    )
+    .await
+    .unwrap();
     assert!(pending.lock().unwrap().is_empty());
     let output = serde_json::to_value(CreateResponse::from(created)).unwrap();
     assert_eq!(
@@ -102,12 +133,16 @@ async fn branch_requests_encode_identifiers_and_preserve_list_metadata() {
     listed.as_object_mut().unwrap().extend(json!({"localId":null,"parentKaikiBranchId":null,"ancestorLsn":null,"isPreviewBranch":true}).as_object().unwrap().clone());
     let (client, pending, server) = serve(vec![
         Exchange {
+            status: 200,
+            key: None,
             method: "GET",
             path: format!("/v1/kaiki/databases/{DB}/branches"),
             body: None,
             response: json!([listed]),
         },
         Exchange {
+            status: 200,
+            key: None,
             method: "GET",
             path: format!(
                 "/v1/kaiki/databases/{DB}/branches/preview%2F..%2Fbranch%3Fscope=other/connection"
@@ -116,12 +151,16 @@ async fn branch_requests_encode_identifiers_and_preserve_list_metadata() {
             response: connection(),
         },
         Exchange {
+            status: 200,
+            key: None,
             method: "POST",
             path: format!("/v1/kaiki/databases/{DB}/branches"),
             body: Some(json!({"name":"preview"})),
             response: branch_json(),
         },
         Exchange {
+            status: 200,
+            key: None,
             method: "DELETE",
             path: format!("/v1/kaiki/databases/{DB}/branches/preview%2F..%2Fbranch%3Fscope=other"),
             body: None,
@@ -146,9 +185,13 @@ async fn branch_requests_encode_identifiers_and_preserve_list_metadata() {
                 name: "preview".into(),
                 ..Default::default()
             },
+            uuid::Uuid::now_v7(),
         )
         .await
         .unwrap();
+    let nrz_api::Branch200Response3::Object(created) = created else {
+        panic!("expected legacy branch")
+    };
     assert_eq!(created.id, branch.id);
     client.delete_database_branch(DB, &branch.id).await.unwrap();
     assert!(pending.lock().unwrap().is_empty());
@@ -160,24 +203,32 @@ async fn database_controls_send_no_body_and_keep_operation_acknowledgements() {
     let ack = json!({"operation_id":DB,"operation_type":"start","resource":{"resource_type":"branch","resource_id":"main"},"status":"pending"});
     let (client, pending, server) = serve(vec![
         Exchange {
+            status: 200,
+            key: None,
             method: "POST",
             path: format!("/v1/kaiki/databases/{DB}/start"),
             body: None,
             response: ack.clone(),
         },
         Exchange {
+            status: 200,
+            key: None,
             method: "POST",
             path: format!("/v1/kaiki/databases/{DB}/stop"),
             body: None,
             response: ack,
         },
         Exchange {
+            status: 200,
+            key: None,
             method: "GET",
             path: format!("/v1/kaiki/databases/{DB}/connection"),
             body: None,
             response: connection(),
         },
         Exchange {
+            status: 200,
+            key: None,
             method: "DELETE",
             path: format!("/v1/kaiki/databases/{DB}"),
             body: None,
@@ -185,14 +236,18 @@ async fn database_controls_send_no_body_and_keep_operation_acknowledgements() {
         },
     ])
     .await;
+    let nrz_api::Start200Response::Object(started) = client.start_database(DB).await.unwrap()
+    else {
+        panic!("expected legacy acknowledgement")
+    };
     assert_eq!(
-        client.start_database(DB).await.unwrap().status,
+        started.status,
         nrz_api::Database200ResponseDatumRuntimeOperationStatus::Pending
     );
-    assert_eq!(
-        client.stop_database(DB).await.unwrap().operation_id,
-        DB.parse::<uuid::Uuid>().unwrap()
-    );
+    let nrz_api::Start200Response::Object(stopped) = client.stop_database(DB).await.unwrap() else {
+        panic!("expected legacy acknowledgement")
+    };
+    assert_eq!(stopped.operation_id, DB.parse::<uuid::Uuid>().unwrap());
     assert!(
         fetch_connection_uri(&client, DB, None)
             .await
@@ -217,13 +272,17 @@ async fn database_detail_and_attachment_reject_another_resource() {
     };
     let (client, pending, server) = serve(vec![
         Exchange {
-            method: "GET",
+            status: 200,
+        key: None,
+        method: "GET",
             path: format!("/v1/kaiki/databases/{DB}"),
             body: None,
             response: serde_json::to_value(detail).unwrap(),
         },
         Exchange {
-            method: "PATCH",
+            status: 200,
+        key: None,
+        method: "PATCH",
             path: format!("/v1/kaiki/databases/{DB}/attachments/{PROJECT}"),
             body: Some(json!({"serviceId":PROJECT,"productEnvironmentId":PROJECT,"ownerProductEnvironmentId":PROJECT,"providerBranchId":"exact-provider-branch","autoInjectDbUrl":false})),
             response: serde_json::to_value(attachment).unwrap(),
@@ -285,6 +344,8 @@ async fn attachment_preserves_explicit_targets_and_rejects_another_binding() {
             ..Default::default()
         };
         let (client, pending, server) = serve(vec![Exchange {
+            status: 200,
+            key: None,
             method: "PATCH",
             path: format!("/v1/kaiki/databases/{DB}/attachments/{PROJECT}"),
             body: Some(serde_json::to_value(&body).unwrap()),
@@ -318,4 +379,316 @@ async fn exact_database_selection_needs_no_application_attachment() {
     );
     assert!(pending.lock().unwrap().is_empty());
     server.abort();
+}
+
+#[tokio::test]
+async fn native_branch_deletion_resolves_names_before_admission_without_connection_reads() {
+    let databases = nrz_api::Database200Response {
+        data: vec![nrz_api::Database200ResponseDatum {
+            id: DB.parse().unwrap(),
+            db_name: "primary".to_owned(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let mut branch = branch_json();
+    branch["id"] = json!(CHILD);
+    branch.as_object_mut().unwrap().extend(
+        json!({"localId":null,"parentKaikiBranchId":null,"ancestorLsn":null,"isPreviewBranch":true})
+            .as_object()
+            .unwrap()
+            .clone(),
+    );
+    let (client, pending, server) = serve(vec![
+        Exchange {
+            status: 200,
+            key: None,
+            method: "GET",
+            path: "/v1/kaiki/databases/".into(),
+            body: None,
+            response: serde_json::to_value(databases).unwrap(),
+        },
+        Exchange {
+            status: 200,
+            key: None,
+            method: "GET",
+            path: format!("/v1/kaiki/databases/{DB}/branches"),
+            body: None,
+            response: json!([branch]),
+        },
+        Exchange {
+            status: 202,
+            key: None,
+            method: "DELETE",
+            path: format!("/v1/kaiki/databases/{DB}/branches/{CHILD}"),
+            body: None,
+            response: operation("branch.delete", "pending"),
+        },
+    ])
+    .await;
+    execute(
+        arguments(&["branches", "delete", "preview", "--database", "primary"]),
+        true,
+        &client,
+        &ProjectConfig::default(),
+    )
+    .await
+    .unwrap();
+    assert!(pending.lock().unwrap().is_empty());
+    server.abort();
+}
+
+const OPERATION: &str = "019f38da-5555-7000-8000-000000000003";
+const ATTEMPT: &str = "019f38da-5555-7000-8000-000000000004";
+const CHILD: &str = "33333333-3333-4333-8333-333333333333";
+
+fn operation(kind: &str, status: &str) -> Value {
+    json!({"operationId":OPERATION,"operationType":kind,"status":status,
+        "result":{"databaseId":DB,"branchId":CHILD,"endpointId":"endpoint"}})
+}
+
+fn arguments(args: &[&str]) -> DbArgs {
+    DbArgs::try_parse_from(std::iter::once("db").chain(args.iter().copied())).unwrap()
+}
+
+#[tokio::test]
+async fn create_and_wait_use_the_receipt_without_reading_connection_or_live_database() {
+    let mut accepted = operation("database.create", "pending");
+    accepted["password"] = json!("private-post-password");
+    for wait in [false, true] {
+        let mut exchanges = vec![Exchange {
+            status: 202,
+            key: Some(ATTEMPT),
+            method: "POST",
+            path: "/v1/kaiki/databases/".into(),
+            body: Some(json!({"dbName":"primary"})),
+            response: accepted.clone(),
+        }];
+        if wait {
+            exchanges.push(Exchange {
+                status: 200,
+                key: None,
+                method: "GET",
+                path: format!("/v1/kaiki/databases/{DB}/operations/{OPERATION}"),
+                body: None,
+                response: operation("database.create", "succeeded"),
+            });
+        }
+        let (client, pending, server) = serve(exchanges).await;
+        let mut args = vec!["create", "--name", "primary", "--idempotency-key", ATTEMPT];
+        if wait {
+            args.push("--wait");
+        }
+        execute(arguments(&args), true, &client, &ProjectConfig::default())
+            .await
+            .unwrap();
+        assert!(pending.lock().unwrap().is_empty());
+        server.abort();
+    }
+    let projected = DatabaseOperation::created(
+        serde_json::from_value(accepted).unwrap(),
+        ATTEMPT.parse().unwrap(),
+    );
+    let serialized = serde_json::to_string(&projected).unwrap();
+    assert!(!serialized.contains("password"));
+    assert!(!serialized.contains("private-post-password"));
+    assert_eq!(
+        serde_json::from_str::<Value>(&serialized).unwrap()["idempotencyKey"],
+        ATTEMPT
+    );
+}
+
+#[tokio::test]
+async fn native_mutation_commands_handle_accepted_and_completed_receipts_without_resource_list_reads()
+ {
+    for status in ["pending", "succeeded"] {
+        for (method, path, args, kind, body) in [
+            (
+                "POST",
+                format!("/v1/kaiki/databases/{DB}/start"),
+                vec!["start", DB],
+                "endpoint.start",
+                None,
+            ),
+            (
+                "POST",
+                format!("/v1/kaiki/databases/{DB}/stop"),
+                vec!["stop", DB],
+                "endpoint.stop",
+                None,
+            ),
+            (
+                "DELETE",
+                format!("/v1/kaiki/databases/{DB}"),
+                vec!["delete", DB, "--force"],
+                "database.delete",
+                None,
+            ),
+            (
+                "POST",
+                format!("/v1/kaiki/databases/{DB}/branches"),
+                vec![
+                    "branches",
+                    "--database",
+                    DB,
+                    "create",
+                    "dev",
+                    "--idempotency-key",
+                    ATTEMPT,
+                ],
+                "branch.create",
+                Some(json!({"name":"dev"})),
+            ),
+            (
+                "DELETE",
+                format!("/v1/kaiki/databases/{DB}/branches/{CHILD}"),
+                vec!["branches", "--database", DB, "delete", CHILD],
+                "branch.delete",
+                None,
+            ),
+        ] {
+            let (client, pending, server) = serve(vec![Exchange {
+                status: if status == "pending" { 202 } else { 200 },
+                key: body.as_ref().map(|_| ATTEMPT),
+                method,
+                path,
+                body,
+                response: operation(kind, status),
+            }])
+            .await;
+            execute(arguments(&args), true, &client, &ProjectConfig::default())
+                .await
+                .unwrap();
+            assert!(pending.lock().unwrap().is_empty());
+            server.abort();
+        }
+    }
+}
+
+#[tokio::test]
+async fn completed_native_create_and_explicit_retry_preserve_one_key_and_never_output_the_password()
+{
+    let mut response = operation("database.create", "succeeded");
+    response["password"] = json!("private-replay-password");
+    let exchanges = (0..2)
+        .map(|_| Exchange {
+            status: 200,
+            key: Some(ATTEMPT),
+            method: "POST",
+            path: "/v1/kaiki/databases/".into(),
+            body: Some(json!({})),
+            response: response.clone(),
+        })
+        .collect();
+    let (client, pending, server) = serve(exchanges).await;
+    for _ in 0..2 {
+        execute(
+            arguments(&["create", "--idempotency-key", ATTEMPT]),
+            false,
+            &client,
+            &ProjectConfig::default(),
+        )
+        .await
+        .unwrap();
+    }
+    assert!(pending.lock().unwrap().is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn operation_status_works_with_a_configured_database_id_after_deletion() {
+    let (client, pending, server) = serve(vec![Exchange {
+        status: 200,
+        key: None,
+        method: "GET",
+        path: format!("/v1/kaiki/databases/{DB}/operations/{OPERATION}"),
+        body: None,
+        response: operation("database.delete", "succeeded"),
+    }])
+    .await;
+    let config: ProjectConfig = toml::from_str(&format!("[db]\ndatabase = '{DB}'\n")).unwrap();
+    execute(
+        arguments(&["operation", OPERATION]),
+        false,
+        &client,
+        &config,
+    )
+    .await
+    .unwrap();
+    assert!(pending.lock().unwrap().is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn operation_wait_rejects_foreign_receipts_and_reports_durable_failure() {
+    for changed in ["database", "operation", "type", "failure"] {
+        let mut receipt = operation("database.create", "succeeded");
+        match changed {
+            "database" => receipt["result"]["databaseId"] = json!(PROJECT),
+            "operation" => receipt["operationId"] = json!(ATTEMPT),
+            "type" => receipt["operationType"] = json!("branch.delete"),
+            _ => {
+                receipt["status"] = json!("failed");
+                receipt["errorCode"] = json!("history_expired");
+            }
+        }
+        let (client, pending, server) = serve(vec![Exchange {
+            status: 200,
+            key: None,
+            method: "GET",
+            path: format!("/v1/kaiki/databases/{DB}/operations/{OPERATION}"),
+            body: None,
+            response: receipt,
+        }])
+        .await;
+        let initial = DatabaseOperation::from(
+            serde_json::from_value::<nrz_api::Database200Response2ObjectOperation>(operation(
+                "database.create",
+                "pending",
+            ))
+            .unwrap(),
+        );
+        let error = wait_operation(&client, initial).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains(if changed == "failure" {
+                "history_expired"
+            } else if changed == "database" {
+                "another database"
+            } else {
+                "identity"
+            }) || changed == "type" && error.to_string().contains("type changed")
+        );
+        assert!(pending.lock().unwrap().is_empty());
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn native_commands_preserve_http_denials_without_falling_back_or_retrying() {
+    for status in [400, 401, 403, 404, 409, 429] {
+        let (client, pending, server) = serve(vec![Exchange {
+            status,
+            key: None,
+            method: "POST",
+            path: format!("/v1/kaiki/databases/{DB}/start"),
+            body: None,
+            response: json!({"code":"FORBIDDEN","message":"command denied"}),
+        }])
+        .await;
+        let error = execute(
+            arguments(&["start", DB]),
+            true,
+            &client,
+            &ProjectConfig::default(),
+        )
+        .await
+        .unwrap_err();
+        let api_error = error
+            .downcast_ref::<crate::api::StructuredApiError>()
+            .unwrap();
+        assert_eq!(api_error.status.as_u16(), status);
+        assert!(pending.lock().unwrap().is_empty());
+        server.abort();
+    }
+    assert!(DbArgs::try_parse_from(["db", "create", "--idempotency-key", DB]).is_err());
 }

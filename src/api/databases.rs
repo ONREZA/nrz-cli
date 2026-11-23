@@ -2,6 +2,20 @@ use super::ApiClient;
 use anyhow::Context;
 use nrz_api::*;
 
+// Native commands share the 200/202 transport while retaining their typed legacy variants.
+macro_rules! command_success {
+    ($response:expr, $request:ty, $ok:path, $accepted:path, $wrap:path) => {
+        match <$request>::parse_response(crate::api::client::ensure_success($response).await?)
+            .await
+            .map_err(nrz_api::response_error)?
+        {
+            $ok(value) => Ok(value),
+            $accepted(value) => Ok($wrap(value)),
+            _ => anyhow::bail!("unexpected successful response from the platform API"),
+        }
+    };
+}
+
 impl ApiClient {
     pub async fn databases(&self) -> anyhow::Result<Database200Response> {
         let response = self
@@ -19,15 +33,23 @@ impl ApiClient {
     pub async fn create_database(
         &self,
         body: DatabaseRequestBody,
+        idempotency_key: uuid::Uuid,
     ) -> anyhow::Result<Database200Response2> {
         let response = self
             .platform()?
-            .post_v1kaiki_databases(PostV1kaikiDatabasesRequest { body })
+            .post_v1kaiki_databases(PostV1kaikiDatabasesRequest {
+                body,
+                header: PostV1kaikiDatabasesRequestHeader {
+                    idempotency_key: Some(idempotency_key.to_string()),
+                },
+            })
             .await?;
-        api_success!(
+        command_success!(
             response,
             PostV1kaikiDatabasesRequest,
-            PostV1kaikiDatabasesResponse::Ok
+            PostV1kaikiDatabasesResponse::Ok,
+            PostV1kaikiDatabasesResponse::Accepted,
+            Database200Response2::Object2
         )
     }
     pub async fn database(&self, id: &str) -> anyhow::Result<Database200Response3> {
@@ -45,7 +67,7 @@ impl ApiClient {
             GetV1kaikiDatabasesByIdResponse::Ok
         )
     }
-    pub async fn delete_database(&self, id: &str) -> anyhow::Result<StatusResponse> {
+    pub async fn delete_database(&self, id: &str) -> anyhow::Result<Database200Response4> {
         let response = self
             .platform()?
             .delete_v1kaiki_databases_by_id(DeleteV1kaikiDatabasesByIdRequest {
@@ -54,10 +76,12 @@ impl ApiClient {
                 },
             })
             .await?;
-        api_success!(
+        command_success!(
             response,
             DeleteV1kaikiDatabasesByIdRequest,
-            DeleteV1kaikiDatabasesByIdResponse::Ok
+            DeleteV1kaikiDatabasesByIdResponse::Ok,
+            DeleteV1kaikiDatabasesByIdResponse::Accepted,
+            Database200Response4::Object
         )
     }
     pub async fn start_database(&self, id: &str) -> anyhow::Result<Start200Response> {
@@ -69,10 +93,12 @@ impl ApiClient {
                 },
             })
             .await?;
-        api_success!(
+        command_success!(
             response,
             PostV1kaikiDatabasesByIdStartRequest,
-            PostV1kaikiDatabasesByIdStopResponse::Ok
+            PostV1kaikiDatabasesByIdStopResponse::Ok,
+            PostV1kaikiDatabasesByIdStopResponse::Accepted,
+            Start200Response::Object2
         )
     }
     pub async fn stop_database(&self, id: &str) -> anyhow::Result<Start200Response> {
@@ -84,10 +110,34 @@ impl ApiClient {
                 },
             })
             .await?;
-        api_success!(
+        command_success!(
             response,
             PostV1kaikiDatabasesByIdStopRequest,
-            PostV1kaikiDatabasesByIdStopResponse::Ok
+            PostV1kaikiDatabasesByIdStopResponse::Ok,
+            PostV1kaikiDatabasesByIdStopResponse::Accepted,
+            Start200Response::Object2
+        )
+    }
+    pub async fn database_operation(
+        &self,
+        id: &str,
+        operation_id: uuid::Uuid,
+    ) -> anyhow::Result<Database200Response2ObjectOperation> {
+        let response = self
+            .platform()?
+            .get_v1kaiki_databases_by_id_operations_by_operation_id(
+                GetV1kaikiDatabasesByIdOperationsByOperationIdRequest {
+                    path: GetV1kaikiDatabasesByIdOperationsByOperationIdRequestPath {
+                        id: id.parse().context("invalid resource ID")?,
+                        operation_id,
+                    },
+                },
+            )
+            .await?;
+        api_success!(
+            response,
+            GetV1kaikiDatabasesByIdOperationsByOperationIdRequest,
+            GetV1kaikiDatabasesByIdOperationsByOperationIdResponse::Ok
         )
     }
     pub async fn database_connection(&self, id: &str) -> anyhow::Result<Connection200Response> {
@@ -124,6 +174,7 @@ impl ApiClient {
         &self,
         id: &str,
         body: BranchRequestBody2,
+        idempotency_key: uuid::Uuid,
     ) -> anyhow::Result<Branch200Response3> {
         let response = self
             .platform()?
@@ -132,19 +183,24 @@ impl ApiClient {
                     id: id.parse().context("invalid resource ID")?,
                 },
                 body,
+                header: PostV1kaikiDatabasesByIdBranchesRequestHeader {
+                    idempotency_key: Some(idempotency_key.to_string()),
+                },
             })
             .await?;
-        api_success!(
+        command_success!(
             response,
             PostV1kaikiDatabasesByIdBranchesRequest,
-            PostV1kaikiDatabasesByIdBranchesResponse::Ok
+            PostV1kaikiDatabasesByIdBranchesResponse::Ok,
+            PostV1kaikiDatabasesByIdBranchesResponse::Accepted,
+            Branch200Response3::Object2
         )
     }
     pub async fn delete_database_branch(
         &self,
         id: &str,
         branch_id: &str,
-    ) -> anyhow::Result<StatusResponse> {
+    ) -> anyhow::Result<Database200Response4> {
         let response = self
             .platform()?
             .delete_v1kaiki_databases_by_id_branches_by_branch_id(
@@ -156,10 +212,12 @@ impl ApiClient {
                 },
             )
             .await?;
-        api_success!(
+        command_success!(
             response,
             DeleteV1kaikiDatabasesByIdBranchesByBranchIdRequest,
-            DeleteV1kaikiDatabasesByIdResponse::Ok
+            DeleteV1kaikiDatabasesByIdResponse::Ok,
+            DeleteV1kaikiDatabasesByIdResponse::Accepted,
+            Database200Response4::Object
         )
     }
     pub async fn database_branch_connection(

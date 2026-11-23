@@ -14,6 +14,7 @@ mod attachment;
 mod branches;
 mod databases;
 mod models;
+mod operations;
 mod query;
 mod sql;
 mod wire;
@@ -21,6 +22,7 @@ use attachment::*;
 use branches::*;
 use databases::*;
 use models::*;
+use operations::*;
 use query::*;
 use sql::execute_sql_locally;
 
@@ -35,6 +37,15 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
+    execute(args, json, &client, config).await
+}
+
+async fn execute(
+    args: DbArgs,
+    json: bool,
+    client: &ApiClient,
+    config: &ProjectConfig,
+) -> anyhow::Result<()> {
     let project_id = args
         .project_id
         .as_deref()
@@ -43,35 +54,45 @@ pub async fn run(
         .transpose()?;
 
     match args.command {
-        DbCommand::List => cmd_list(&client, project_id.as_deref(), json).await,
+        DbCommand::List => cmd_list(client, project_id.as_deref(), json).await,
         DbCommand::Create {
             name,
             cu_size,
             wait,
-        } => cmd_create(&client, json, name, cu_size, wait).await,
+            idempotency_key,
+        } => cmd_create(client, json, name, cu_size, wait, idempotency_key).await,
+        DbCommand::Operation {
+            operation_id,
+            database,
+            wait,
+        } => {
+            let db_id =
+                resolve_db(client, project_id.as_deref(), database.as_deref(), config).await?;
+            cmd_operation(client, &db_id, operation_id, wait, json).await
+        }
         DbCommand::Info { database } => {
             let db_id =
-                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
-            cmd_info(&client, project_id.as_deref(), &db_id, json).await
+                resolve_db(client, project_id.as_deref(), database.as_deref(), config).await?;
+            cmd_info(client, project_id.as_deref(), &db_id, json).await
         }
         DbCommand::Delete { database, force } => {
-            let db_id = resolve_db(&client, project_id.as_deref(), Some(&database), config).await?;
-            cmd_delete(&client, &db_id, json, force).await
+            let db_id = resolve_db(client, project_id.as_deref(), Some(&database), config).await?;
+            cmd_delete(client, &db_id, json, force).await
         }
         DbCommand::Start { database } => {
             let db_id =
-                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
-            cmd_start_stop(&client, &db_id, json, "start").await
+                resolve_db(client, project_id.as_deref(), database.as_deref(), config).await?;
+            cmd_start_stop(client, &db_id, json, "start").await
         }
         DbCommand::Stop { database } => {
             let db_id =
-                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
-            cmd_start_stop(&client, &db_id, json, "stop").await
+                resolve_db(client, project_id.as_deref(), database.as_deref(), config).await?;
+            cmd_start_stop(client, &db_id, json, "stop").await
         }
         DbCommand::Connection { database, branch } => {
             let db_id =
-                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
-            cmd_connection(&client, &db_id, json, branch.as_deref()).await
+                resolve_db(client, project_id.as_deref(), database.as_deref(), config).await?;
+            cmd_connection(client, &db_id, json, branch.as_deref()).await
         }
         DbCommand::Query {
             database,
@@ -80,30 +101,29 @@ pub async fn run(
             branch,
         } => {
             let db_id =
-                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
+                resolve_db(client, project_id.as_deref(), database.as_deref(), config).await?;
             let sql = resolve_sql(sql.as_deref(), file.as_deref())?;
-            cmd_query(&client, &db_id, json, &sql, branch.as_deref()).await
+            cmd_query(client, &db_id, json, &sql, branch.as_deref()).await
         }
         DbCommand::Branches(bargs) => {
             let db_id = resolve_db(
-                &client,
+                client,
                 project_id.as_deref(),
                 bargs.database.as_deref(),
                 config,
             )
             .await?;
             match bargs.command {
-                None | Some(BranchesCommand::List) => {
-                    cmd_branches_list(&client, &db_id, json).await
-                }
-                Some(BranchesCommand::Create { name }) => {
-                    cmd_branches_create(&client, &db_id, json, &name).await
-                }
+                None | Some(BranchesCommand::List) => cmd_branches_list(client, &db_id, json).await,
+                Some(BranchesCommand::Create {
+                    name,
+                    idempotency_key,
+                }) => cmd_branches_create(client, &db_id, json, &name, idempotency_key).await,
                 Some(BranchesCommand::Delete { branch }) => {
-                    cmd_branches_delete(&client, &db_id, json, &branch).await
+                    cmd_branches_delete(client, &db_id, json, &branch).await
                 }
                 Some(BranchesCommand::Connection { branch }) => {
-                    cmd_branch_connection(&client, &db_id, json, &branch).await
+                    cmd_branch_connection(client, &db_id, json, &branch).await
                 }
             }
         }
@@ -111,13 +131,13 @@ pub async fn run(
             binding_body(&cargs)?;
             let project_id = nrz::config::resolve_project_id(project_id.as_deref(), config)?;
             // Binding authoring can select an authorized database before it is attached.
-            let db_id = resolve_db(&client, None, cargs.database.as_deref(), config).await?;
-            cmd_config(&client, &project_id, &db_id, json, cargs).await
+            let db_id = resolve_db(client, None, cargs.database.as_deref(), config).await?;
+            cmd_config(client, &project_id, &db_id, json, cargs).await
         }
         DbCommand::Schema { database, branch } => {
             let db_id =
-                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
-            cmd_schema(&client, &db_id, json, branch.as_deref()).await
+                resolve_db(client, project_id.as_deref(), database.as_deref(), config).await?;
+            cmd_schema(client, &db_id, json, branch.as_deref()).await
         }
     }
 }
@@ -262,6 +282,9 @@ async fn fetch_connection_uri(
 }
 
 async fn resolve_branch(client: &ApiClient, db_id: &str, branch: &str) -> anyhow::Result<String> {
+    if let Ok(id) = branch.parse::<uuid::Uuid>() {
+        return Ok(id.to_string());
+    }
     let list = client
         .database_branches(db_id)
         .await

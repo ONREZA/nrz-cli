@@ -25612,6 +25612,9 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "pendingReason": {
+                            "type": "string"
+                          },
                           "id": {
                             "type": "string",
                             "format": "uuid"
@@ -26595,6 +26598,34 @@
                                       }
                                     ]
                                   },
+                                  "endpointObservedState": {
+                                    "anyOf": [
+                                      {
+                                        "anyOf": [
+                                          {
+                                            "enum": [
+                                              "pending",
+                                              "scheduling",
+                                              "configuring",
+                                              "running",
+                                              "stopping",
+                                              "stopped",
+                                              "failed",
+                                              "deleted"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          {
+                                            "const": "starting",
+                                            "type": "string"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
                                   "operations": {
                                     "type": "array",
                                     "items": {
@@ -27395,7 +27426,7 @@
           "Managed Databases"
         ],
         "summary": "Create managed database",
-        "description": "Creates a managed PostgreSQL database and returns the local database row plus the generated password.",
+        "description": "Creates a managed PostgreSQL database and returns its generated password. V2 requires an Idempotency-Key UUIDv7 header: keep one key for retries of the same attempt; a changed request with that key returns a conflict. Legacy V1 preserves its existing behavior and ignores the optional key.",
         "security": [
           {
             "sessionCookieAuth": []
@@ -27405,6 +27436,17 @@
           },
           {
             "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
           }
         ],
         "requestBody": {
@@ -27465,170 +27507,388 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "productId": {
-                      "anyOf": [
-                        {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "operation": {
+                          "type": "object",
+                          "properties": {
+                            "operationId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "operationType": {
+                              "enum": [
+                                "database.create",
+                                "database.delete",
+                                "branch.create",
+                                "branch.restore",
+                                "branch.delete",
+                                "endpoint.start",
+                                "endpoint.stop",
+                                "endpoint.resize"
+                              ],
+                              "type": "string"
+                            },
+                            "status": {
+                              "enum": [
+                                "pending",
+                                "running",
+                                "succeeded",
+                                "failed",
+                                "cancelled"
+                              ],
+                              "type": "string"
+                            },
+                            "result": {
+                              "type": "object",
+                              "properties": {
+                                "databaseId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "branchId": {
+                                  "type": "string"
+                                },
+                                "endpointId": {
+                                  "type": "string"
+                                },
+                                "resolvedLsn": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "databaseId"
+                              ]
+                            },
+                            "errorCode": {
+                              "type": "string"
+                            },
+                            "pendingReason": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "operationId",
+                            "operationType",
+                            "status",
+                            "result"
+                          ]
+                        },
+                        "id": {
                           "type": "string",
                           "format": "uuid"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "workspaceId": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "kaikiDatabaseId": {
-                      "type": "string"
-                    },
-                    "kaikiEndpointId": {
-                      "type": "string"
-                    },
-                    "dbName": {
-                      "type": "string"
-                    },
-                    "roleName": {
-                      "type": "string"
-                    },
-                    "pgVersion": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "cuSize": {
-                      "type": "number"
-                    },
-                    "status": {
-                      "enum": [
-                        "CREATING",
-                        "ACTIVE",
-                        "ERROR",
-                        "DELETED",
-                        "DELETING"
-                      ],
-                      "type": "string"
-                    },
-                    "encryptedPassword": {
-                      "anyOf": [
-                        {
-                          "type": "string"
+                        "productId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "encryptedConnUri": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "autoscaleEnabled": {
-                      "type": "boolean"
-                    },
-                    "autoscaleMinCu": {
-                      "anyOf": [
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "autoscaleMaxCu": {
-                      "anyOf": [
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "kaikiSyncNeeded": {
-                      "type": "boolean"
-                    },
-                    "kaikiSyncAttemptAt": {
-                      "anyOf": [
-                        {
+                        "workspaceId": {
                           "type": "string",
-                          "format": "date-time"
+                          "format": "uuid"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "kaikiSyncError": {
-                      "anyOf": [
-                        {
+                        "kaikiDatabaseId": {
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "suspendTimeoutSeconds": {
-                      "anyOf": [
-                        {
+                        "kaikiEndpointId": {
+                          "type": "string"
+                        },
+                        "dbName": {
+                          "type": "string"
+                        },
+                        "roleName": {
+                          "type": "string"
+                        },
+                        "pgVersion": {
                           "type": "integer",
                           "minimum": -9007199254740991,
                           "maximum": 9007199254740991
                         },
-                        {
-                          "type": "null"
+                        "cuSize": {
+                          "type": "number"
+                        },
+                        "status": {
+                          "enum": [
+                            "CREATING",
+                            "ACTIVE",
+                            "ERROR",
+                            "DELETED",
+                            "DELETING"
+                          ],
+                          "type": "string"
+                        },
+                        "encryptedPassword": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "encryptedConnUri": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "autoscaleEnabled": {
+                          "type": "boolean"
+                        },
+                        "autoscaleMinCu": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "autoscaleMaxCu": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "kaikiSyncNeeded": {
+                          "type": "boolean"
+                        },
+                        "kaikiSyncAttemptAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "kaikiSyncError": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "suspendTimeoutSeconds": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "password": {
+                          "type": "string"
+                        },
+                        "pendingCuSize": {
+                          "type": "number"
                         }
+                      },
+                      "required": [
+                        "id",
+                        "productId",
+                        "workspaceId",
+                        "kaikiDatabaseId",
+                        "kaikiEndpointId",
+                        "dbName",
+                        "roleName",
+                        "pgVersion",
+                        "cuSize",
+                        "status",
+                        "encryptedPassword",
+                        "encryptedConnUri",
+                        "autoscaleEnabled",
+                        "autoscaleMinCu",
+                        "autoscaleMaxCu",
+                        "kaikiSyncNeeded",
+                        "kaikiSyncAttemptAt",
+                        "kaikiSyncError",
+                        "createdAt",
+                        "updatedAt",
+                        "suspendTimeoutSeconds",
+                        "password"
                       ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "operationType": {
+                          "enum": [
+                            "database.create",
+                            "database.delete",
+                            "branch.create",
+                            "branch.restore",
+                            "branch.delete",
+                            "endpoint.start",
+                            "endpoint.stop",
+                            "endpoint.resize"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
+                          "type": "string"
+                        },
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "databaseId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branchId": {
+                              "type": "string"
+                            },
+                            "endpointId": {
+                              "type": "string"
+                            },
+                            "resolvedLsn": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "databaseId"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        },
+                        "pendingReason": {
+                          "type": "string"
+                        },
+                        "password": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "operationId",
+                        "operationType",
+                        "status",
+                        "result",
+                        "password"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "operationType": {
+                      "enum": [
+                        "database.create",
+                        "database.delete",
+                        "branch.create",
+                        "branch.restore",
+                        "branch.delete",
+                        "endpoint.start",
+                        "endpoint.stop",
+                        "endpoint.resize"
+                      ],
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "databaseId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "branchId": {
+                          "type": "string"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "resolvedLsn": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "databaseId"
+                      ]
+                    },
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "pendingReason": {
+                      "type": "string"
                     },
                     "password": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "id",
-                    "productId",
-                    "workspaceId",
-                    "kaikiDatabaseId",
-                    "kaikiEndpointId",
-                    "dbName",
-                    "roleName",
-                    "pgVersion",
-                    "cuSize",
+                    "operationId",
+                    "operationType",
                     "status",
-                    "encryptedPassword",
-                    "encryptedConnUri",
-                    "autoscaleEnabled",
-                    "autoscaleMinCu",
-                    "autoscaleMaxCu",
-                    "kaikiSyncNeeded",
-                    "kaikiSyncAttemptAt",
-                    "kaikiSyncError",
-                    "createdAt",
-                    "updatedAt",
-                    "suspendTimeoutSeconds",
+                    "result",
                     "password"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
@@ -27817,6 +28077,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "pendingReason": {
+                      "type": "string"
+                    },
                     "id": {
                       "type": "string",
                       "format": "uuid"
@@ -28060,6 +28323,64 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "sqlConsoleAvailable": {
+                      "type": "boolean"
+                    },
+                    "restoreAvailable": {
+                      "type": "boolean"
+                    },
+                    "branchDeleteAvailable": {
+                      "type": "boolean"
+                    },
+                    "restorePending": {
+                      "type": "boolean"
+                    },
+                    "runtimeDetailsAvailable": {
+                      "type": "boolean"
+                    },
+                    "powerAvailable": {
+                      "type": "boolean"
+                    },
+                    "resizeAvailable": {
+                      "type": "boolean"
+                    },
+                    "autoscaleAvailable": {
+                      "type": "boolean"
+                    },
+                    "pendingCuSize": {
+                      "type": "number"
+                    },
+                    "deleteAvailable": {
+                      "type": "boolean"
+                    },
+                    "endpointObservedState": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "pending",
+                                "scheduling",
+                                "configuring",
+                                "running",
+                                "stopping",
+                                "stopped",
+                                "failed",
+                                "deleted"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "const": "starting",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "kaikiStatus": {
                       "enum": [
@@ -29207,6 +29528,71 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "operation": {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "operationType": {
+                          "enum": [
+                            "database.create",
+                            "database.delete",
+                            "branch.create",
+                            "branch.restore",
+                            "branch.delete",
+                            "endpoint.start",
+                            "endpoint.stop",
+                            "endpoint.resize"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
+                          "type": "string"
+                        },
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "databaseId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branchId": {
+                              "type": "string"
+                            },
+                            "endpointId": {
+                              "type": "string"
+                            },
+                            "resolvedLsn": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "databaseId"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        },
+                        "pendingReason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "operationId",
+                        "operationType",
+                        "status",
+                        "result"
+                      ]
+                    },
                     "id": {
                       "type": "string",
                       "format": "uuid"
@@ -29345,6 +29731,252 @@
                     },
                     "password": {
                       "type": "string"
+                    },
+                    "pendingCuSize": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "productId",
+                    "workspaceId",
+                    "kaikiDatabaseId",
+                    "kaikiEndpointId",
+                    "dbName",
+                    "roleName",
+                    "pgVersion",
+                    "cuSize",
+                    "status",
+                    "encryptedPassword",
+                    "encryptedConnUri",
+                    "autoscaleEnabled",
+                    "autoscaleMinCu",
+                    "autoscaleMaxCu",
+                    "kaikiSyncNeeded",
+                    "kaikiSyncAttemptAt",
+                    "kaikiSyncError",
+                    "createdAt",
+                    "updatedAt",
+                    "suspendTimeoutSeconds"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "operationType": {
+                          "enum": [
+                            "database.create",
+                            "database.delete",
+                            "branch.create",
+                            "branch.restore",
+                            "branch.delete",
+                            "endpoint.start",
+                            "endpoint.stop",
+                            "endpoint.resize"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
+                          "type": "string"
+                        },
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "databaseId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branchId": {
+                              "type": "string"
+                            },
+                            "endpointId": {
+                              "type": "string"
+                            },
+                            "resolvedLsn": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "databaseId"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        },
+                        "pendingReason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "operationId",
+                        "operationType",
+                        "status",
+                        "result"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "productId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "kaikiDatabaseId": {
+                      "type": "string"
+                    },
+                    "kaikiEndpointId": {
+                      "type": "string"
+                    },
+                    "dbName": {
+                      "type": "string"
+                    },
+                    "roleName": {
+                      "type": "string"
+                    },
+                    "pgVersion": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "cuSize": {
+                      "type": "number"
+                    },
+                    "status": {
+                      "enum": [
+                        "CREATING",
+                        "ACTIVE",
+                        "ERROR",
+                        "DELETED",
+                        "DELETING"
+                      ],
+                      "type": "string"
+                    },
+                    "encryptedPassword": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "encryptedConnUri": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "autoscaleEnabled": {
+                      "type": "boolean"
+                    },
+                    "autoscaleMinCu": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "autoscaleMaxCu": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kaikiSyncNeeded": {
+                      "type": "boolean"
+                    },
+                    "kaikiSyncAttemptAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "kaikiSyncError": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "suspendTimeoutSeconds": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "password": {
+                      "type": "string"
+                    },
+                    "pendingCuSize": {
+                      "type": "number"
                     }
                   },
                   "required": [
@@ -29523,7 +30155,7 @@
           "Managed Databases"
         ],
         "summary": "Delete managed database",
-        "description": "Deletes a managed PostgreSQL database and waits for the provider terminal result.",
+        "description": "V2 returns a durable accepted operation. V1 waits for the provider terminal result.",
         "security": [
           {
             "sessionCookieAuth": []
@@ -29552,15 +30184,157 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "deleted",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "operationType": {
+                          "enum": [
+                            "database.create",
+                            "database.delete",
+                            "branch.create",
+                            "branch.restore",
+                            "branch.delete",
+                            "endpoint.start",
+                            "endpoint.stop",
+                            "endpoint.resize"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
+                          "type": "string"
+                        },
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "databaseId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branchId": {
+                              "type": "string"
+                            },
+                            "endpointId": {
+                              "type": "string"
+                            },
+                            "resolvedLsn": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "databaseId"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        },
+                        "pendingReason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "operationId",
+                        "operationType",
+                        "status",
+                        "result"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
                   "type": "object",
                   "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "operationType": {
+                      "enum": [
+                        "database.create",
+                        "database.delete",
+                        "branch.create",
+                        "branch.restore",
+                        "branch.delete",
+                        "endpoint.start",
+                        "endpoint.stop",
+                        "endpoint.resize"
+                      ],
+                      "type": "string"
+                    },
                     "status": {
-                      "const": "deleted",
+                      "enum": [
+                        "pending",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "databaseId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "branchId": {
+                          "type": "string"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "resolvedLsn": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "databaseId"
+                      ]
+                    },
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "pendingReason": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "status"
+                    "operationId",
+                    "operationType",
+                    "status",
+                    "result"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
                 }
@@ -29746,47 +30520,162 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "operation_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "operation_type": {
-                      "type": "string"
-                    },
-                    "resource": {
+                  "anyOf": [
+                    {
                       "type": "object",
                       "properties": {
-                        "resource_generation": {
-                          "anyOf": [
-                            {
-                              "type": "integer",
-                              "minimum": -2147483648,
-                              "maximum": 2147483647
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
+                        "operation_id": {
+                          "type": "string",
+                          "format": "uuid"
                         },
-                        "resource_id": {
-                          "anyOf": [
-                            {
+                        "operation_type": {
+                          "type": "string"
+                        },
+                        "resource": {
+                          "type": "object",
+                          "properties": {
+                            "resource_generation": {
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": -2147483648,
+                                  "maximum": 2147483647
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "resource_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "resource_type": {
                               "type": "string"
-                            },
-                            {
-                              "type": "null"
                             }
+                          },
+                          "required": [
+                            "resource_type"
                           ]
                         },
-                        "resource_type": {
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
                           "type": "string"
                         }
                       },
                       "required": [
-                        "resource_type"
+                        "operation_id",
+                        "operation_type",
+                        "resource",
+                        "status"
                       ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "operationType": {
+                          "enum": [
+                            "database.create",
+                            "database.delete",
+                            "branch.create",
+                            "branch.restore",
+                            "branch.delete",
+                            "endpoint.start",
+                            "endpoint.stop",
+                            "endpoint.resize"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
+                          "type": "string"
+                        },
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "databaseId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branchId": {
+                              "type": "string"
+                            },
+                            "endpointId": {
+                              "type": "string"
+                            },
+                            "resolvedLsn": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "databaseId"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        },
+                        "pendingReason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "operationId",
+                        "operationType",
+                        "status",
+                        "result"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "operationType": {
+                      "enum": [
+                        "database.create",
+                        "database.delete",
+                        "branch.create",
+                        "branch.restore",
+                        "branch.delete",
+                        "endpoint.start",
+                        "endpoint.stop",
+                        "endpoint.resize"
+                      ],
+                      "type": "string"
                     },
                     "status": {
                       "enum": [
@@ -29797,13 +30686,40 @@
                         "cancelled"
                       ],
                       "type": "string"
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "databaseId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "branchId": {
+                          "type": "string"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "resolvedLsn": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "databaseId"
+                      ]
+                    },
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "pendingReason": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "operation_id",
-                    "operation_type",
-                    "resource",
-                    "status"
+                    "operationId",
+                    "operationType",
+                    "status",
+                    "result"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
                 }
@@ -29989,47 +30905,162 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "operation_id": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "operation_type": {
-                      "type": "string"
-                    },
-                    "resource": {
+                  "anyOf": [
+                    {
                       "type": "object",
                       "properties": {
-                        "resource_generation": {
-                          "anyOf": [
-                            {
-                              "type": "integer",
-                              "minimum": -2147483648,
-                              "maximum": 2147483647
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
+                        "operation_id": {
+                          "type": "string",
+                          "format": "uuid"
                         },
-                        "resource_id": {
-                          "anyOf": [
-                            {
+                        "operation_type": {
+                          "type": "string"
+                        },
+                        "resource": {
+                          "type": "object",
+                          "properties": {
+                            "resource_generation": {
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": -2147483648,
+                                  "maximum": 2147483647
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "resource_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "resource_type": {
                               "type": "string"
-                            },
-                            {
-                              "type": "null"
                             }
+                          },
+                          "required": [
+                            "resource_type"
                           ]
                         },
-                        "resource_type": {
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
                           "type": "string"
                         }
                       },
                       "required": [
-                        "resource_type"
+                        "operation_id",
+                        "operation_type",
+                        "resource",
+                        "status"
                       ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "operationType": {
+                          "enum": [
+                            "database.create",
+                            "database.delete",
+                            "branch.create",
+                            "branch.restore",
+                            "branch.delete",
+                            "endpoint.start",
+                            "endpoint.stop",
+                            "endpoint.resize"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
+                          "type": "string"
+                        },
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "databaseId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branchId": {
+                              "type": "string"
+                            },
+                            "endpointId": {
+                              "type": "string"
+                            },
+                            "resolvedLsn": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "databaseId"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        },
+                        "pendingReason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "operationId",
+                        "operationType",
+                        "status",
+                        "result"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "operationType": {
+                      "enum": [
+                        "database.create",
+                        "database.delete",
+                        "branch.create",
+                        "branch.restore",
+                        "branch.delete",
+                        "endpoint.start",
+                        "endpoint.stop",
+                        "endpoint.resize"
+                      ],
+                      "type": "string"
                     },
                     "status": {
                       "enum": [
@@ -30040,13 +31071,40 @@
                         "cancelled"
                       ],
                       "type": "string"
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "databaseId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "branchId": {
+                          "type": "string"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "resolvedLsn": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "databaseId"
+                      ]
+                    },
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "pendingReason": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "operation_id",
-                    "operation_type",
-                    "resource",
-                    "status"
+                    "operationId",
+                    "operationType",
+                    "status",
+                    "result"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
                 }
@@ -30709,6 +31767,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
           }
         ],
         "requestBody": {
@@ -30744,253 +31811,395 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ancestor_lsn": {
-                      "anyOf": [
-                        {
-                          "type": "string"
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "ancestor_lsn": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "causation_id": {
-                      "anyOf": [
-                        {
-                          "type": "string"
+                        "causation_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "correlation_id": {
-                      "anyOf": [
-                        {
-                          "type": "string"
+                        "correlation_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "database_id": {
-                      "type": "string"
-                    },
-                    "deleted_at": {
-                      "anyOf": [
-                        {
+                        "created_at": {
                           "type": "string",
                           "format": "date-time"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "deletion_reason": {
-                      "anyOf": [
-                        {
+                        "database_id": {
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "deployment_id": {
-                      "anyOf": [
-                        {
+                        "deleted_at": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "deletion_reason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "deployment_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "desired_state": {
+                          "enum": [
+                            "active",
+                            "deleted"
+                          ],
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "desired_state": {
-                      "enum": [
-                        "active",
-                        "deleted"
-                      ],
-                      "type": "string"
-                    },
-                    "endpoint_id": {
-                      "anyOf": [
-                        {
+                        "endpoint_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "expires_at": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "external_generation": {
+                          "type": "integer",
+                          "minimum": -2147483648,
+                          "maximum": 2147483647
+                        },
+                        "external_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "fork_kind": {
+                          "enum": [
+                            "branch",
+                            "pitr_restore"
+                          ],
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "expires_at": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "external_generation": {
-                      "type": "integer",
-                      "minimum": -2147483648,
-                      "maximum": 2147483647
-                    },
-                    "external_id": {
-                      "anyOf": [
-                        {
+                        "id": {
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "fork_kind": {
-                      "enum": [
-                        "branch",
-                        "pitr_restore"
-                      ],
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "integration_annotations": {
-                      "type": "object",
-                      "propertyNames": {
-                        "type": "string"
-                      },
-                      "additionalProperties": {
-                        "type": "string"
-                      }
-                    },
-                    "labels": {
-                      "type": "object",
-                      "propertyNames": {
-                        "type": "string"
-                      },
-                      "additionalProperties": {
-                        "type": "string"
-                      }
-                    },
-                    "last_error_code": {
-                      "anyOf": [
-                        {
+                        "integration_annotations": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "labels": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        "last_error_code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "last_error_retryable": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lifecycle_phase": {
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "last_error_retryable": {
-                      "anyOf": [
-                        {
+                        "name": {
+                          "type": "string"
+                        },
+                        "operation_id": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "parent_branch_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "protected": {
                           "type": "boolean"
                         },
-                        {
-                          "type": "null"
+                        "request_hash": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "resource_version": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "status": {
+                          "enum": [
+                            "creating",
+                            "active",
+                            "failed",
+                            "deleting",
+                            "deleted"
+                          ],
+                          "type": "string"
+                        },
+                        "tombstone_retained_until": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "updated_at": {
+                          "type": "string",
+                          "format": "date-time"
                         }
+                      },
+                      "required": [
+                        "created_at",
+                        "database_id",
+                        "desired_state",
+                        "external_generation",
+                        "fork_kind",
+                        "id",
+                        "integration_annotations",
+                        "labels",
+                        "lifecycle_phase",
+                        "name",
+                        "protected",
+                        "resource_version",
+                        "status",
+                        "updated_at"
                       ]
                     },
-                    "lifecycle_phase": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "operation_id": {
-                      "anyOf": [
-                        {
+                    {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
                           "type": "string",
                           "format": "uuid"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "parent_branch_id": {
-                      "anyOf": [
-                        {
+                        "operationType": {
+                          "enum": [
+                            "database.create",
+                            "database.delete",
+                            "branch.create",
+                            "branch.restore",
+                            "branch.delete",
+                            "endpoint.start",
+                            "endpoint.stop",
+                            "endpoint.resize"
+                          ],
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "protected": {
-                      "type": "boolean"
-                    },
-                    "request_hash": {
-                      "anyOf": [
-                        {
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
                           "type": "string"
                         },
-                        {
-                          "type": "null"
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "databaseId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branchId": {
+                              "type": "string"
+                            },
+                            "endpointId": {
+                              "type": "string"
+                            },
+                            "resolvedLsn": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "databaseId"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        },
+                        "pendingReason": {
+                          "type": "string"
                         }
+                      },
+                      "required": [
+                        "operationId",
+                        "operationType",
+                        "status",
+                        "result"
                       ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid"
                     },
-                    "resource_version": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "status": {
+                    "operationType": {
                       "enum": [
-                        "creating",
-                        "active",
-                        "failed",
-                        "deleting",
-                        "deleted"
+                        "database.create",
+                        "database.delete",
+                        "branch.create",
+                        "branch.restore",
+                        "branch.delete",
+                        "endpoint.start",
+                        "endpoint.stop",
+                        "endpoint.resize"
                       ],
                       "type": "string"
                     },
-                    "tombstone_retained_until": {
-                      "anyOf": [
-                        {
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "databaseId": {
                           "type": "string",
-                          "format": "date-time"
+                          "format": "uuid"
                         },
-                        {
-                          "type": "null"
+                        "branchId": {
+                          "type": "string"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "resolvedLsn": {
+                          "type": "string"
                         }
+                      },
+                      "required": [
+                        "databaseId"
                       ]
                     },
-                    "updated_at": {
-                      "type": "string",
-                      "format": "date-time"
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "pendingReason": {
+                      "type": "string"
                     }
                   },
                   "required": [
-                    "created_at",
-                    "database_id",
-                    "desired_state",
-                    "external_generation",
-                    "fork_kind",
-                    "id",
-                    "integration_annotations",
-                    "labels",
-                    "lifecycle_phase",
-                    "name",
-                    "protected",
-                    "resource_version",
+                    "operationId",
+                    "operationType",
                     "status",
-                    "updated_at"
+                    "result"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
                 }
@@ -31624,15 +32833,157 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "const": "deleted",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "operationType": {
+                          "enum": [
+                            "database.create",
+                            "database.delete",
+                            "branch.create",
+                            "branch.restore",
+                            "branch.delete",
+                            "endpoint.start",
+                            "endpoint.stop",
+                            "endpoint.resize"
+                          ],
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ],
+                          "type": "string"
+                        },
+                        "result": {
+                          "type": "object",
+                          "properties": {
+                            "databaseId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branchId": {
+                              "type": "string"
+                            },
+                            "endpointId": {
+                              "type": "string"
+                            },
+                            "resolvedLsn": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "databaseId"
+                          ]
+                        },
+                        "errorCode": {
+                          "type": "string"
+                        },
+                        "pendingReason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "operationId",
+                        "operationType",
+                        "status",
+                        "result"
+                      ]
+                    }
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
                   "type": "object",
                   "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "operationType": {
+                      "enum": [
+                        "database.create",
+                        "database.delete",
+                        "branch.create",
+                        "branch.restore",
+                        "branch.delete",
+                        "endpoint.start",
+                        "endpoint.stop",
+                        "endpoint.resize"
+                      ],
+                      "type": "string"
+                    },
                     "status": {
-                      "const": "deleted",
+                      "enum": [
+                        "pending",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "databaseId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "branchId": {
+                          "type": "string"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "resolvedLsn": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "databaseId"
+                      ]
+                    },
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "pendingReason": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "status"
+                    "operationId",
+                    "operationType",
+                    "status",
+                    "result"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
                 }
@@ -40755,6 +42106,262 @@
           }
         },
         "operationId": "deleteV1ProjectsByIdServicesByServiceIdConfigByKey"
+      }
+    },
+    "/v1/kaiki/databases/{id}/operations/{operationId}": {
+      "get": {
+        "tags": [
+          "Managed Databases"
+        ],
+        "summary": "Read a durable native lifecycle operation",
+        "description": "V2 operation receipts remain observable after database or branch deletion, subject to current command authority. Results never contain credentials.",
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "operationType": {
+                      "enum": [
+                        "database.create",
+                        "database.delete",
+                        "branch.create",
+                        "branch.restore",
+                        "branch.delete",
+                        "endpoint.start",
+                        "endpoint.stop",
+                        "endpoint.resize"
+                      ],
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "databaseId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "branchId": {
+                          "type": "string"
+                        },
+                        "endpointId": {
+                          "type": "string"
+                        },
+                        "resolvedLsn": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "databaseId"
+                      ]
+                    },
+                    "errorCode": {
+                      "type": "string"
+                    },
+                    "pendingReason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "operationId",
+                    "operationType",
+                    "status",
+                    "result"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getV1KaikiDatabasesByIdOperationsByOperationId"
       }
     }
   },

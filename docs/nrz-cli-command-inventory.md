@@ -177,15 +177,16 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | Команда | Назначение | Опции |
 | --- | --- | --- |
 | `nrz db list` | Список managed databases workspace; выбранный Product сужает список. | `--project-id`. |
-| `nrz db create` | Создает самостоятельную managed DB без неявного app binding. | `--name`, `--cu-size`, `--wait`; приложение подключается отдельным `db config`. |
+| `nrz db create` | Создает самостоятельную managed DB без неявного app binding. | `--name`, `--cu-size`, `--wait`, `--idempotency-key <UUIDv7>`; приложение подключается отдельным `db config`. |
 | `nrz db info [DATABASE]` | Детали DB. | DB можно указать ID/name; иначе auto-resolve. |
 | `nrz db delete <DATABASE>` | Удаляет DB. | `--force` для non-interactive/JSON. |
 | `nrz db start [DATABASE]` | Запускает stopped DB. | DB optional, auto-resolve требует единственного подходящего ресурса в выбранном scope. |
 | `nrz db stop [DATABASE]` | Останавливает running DB. | DB optional, auto-resolve требует единственного подходящего ресурса в выбранном scope. |
+| `nrz db operation <OPERATION_ID>` | Читает durable operation, в том числе после удаления DB. | `--database <UUID>` или сохранённый `[db].database`; `--wait` ждёт терминального статуса. |
 | `nrz db connection [DATABASE]` | Печатает connection string. | `--branch` для branch connection. |
 | `nrz db query [SQL]` | Выполняет SQL локально с устройства через PostgreSQL connection URI. | API используется только для auth/project/database resolution и получения connection URI. `--database`, `--file`, `--branch`; если SQL и file не заданы, читает stdin. |
 | `nrz db branches [list]` | Список branches. | `--database`; subcommand optional, отсутствие subcommand = `list`. |
-| `nrz db branches create <NAME>` | Создает branch. | `--database`. |
+| `nrz db branches create <NAME>` | Создает branch. | `--database`, `--idempotency-key <UUIDv7>`. |
 | `nrz db branches delete <BRANCH>` | Удаляет branch по ID/name. | `--database`. |
 | `nrz db branches connection <BRANCH>` | Печатает branch connection string. | `--database`. |
 | `nrz db config [DATABASE]` | Показывает все Service bindings выбранного Product или создаёт/меняет один точный binding. | Для изменения обязательны `--service-id`, `--product-environment-id`, `--owner-product-environment-id`, `--provider-branch-id`. Настройки: `--auto-inject true|false`, `--env-var`, `--preview-branches true|false`, `--functions-default true|false`. |
@@ -275,13 +276,35 @@ Managed database commands use the generated OpenAPI client. Without an explicit
 ID/name or `[db].database`, selection requires a unique auto-inject attachment,
 or a unique project attachment when auto-inject is disabled. Ambiguous names or
 attachments require an exact ID; response ordering never selects a database for
-a mutation. Branch IDs are resolved against the database branch list before a
-branch command runs.
+a mutation. Explicit database and branch UUIDs go directly to the requested endpoint, where
+the API checks authority. Branch names and legacy opaque branch IDs are resolved
+against the database branch list.
 
-`nrz db create --wait --json` emits the same database information projection as
-`nrz db info --json`. Creation credentials are not included in that projection.
-Start/stop responses report the accepted operation status; `pending` is not a
-claim that compute has already started or stopped.
+Native v2 create/delete/start/stop and branch create/delete return an operation
+receipt in both output modes, for accepted HTTP 202 and terminal HTTP 200.
+`pending`/`running` describe acceptance; `succeeded` confirms completion. The
+allowlisted JSON includes `operationId`, `operationType`, `status`, `result` and
+available `pendingReason`/`errorCode`, never the POST-only password. Legacy HTTP
+200 response projections remain supported.
+
+`nrz db create --wait --json` follows native operations through their receipt GET
+and emits the final receipt. Legacy creation retains its database readiness
+polling and information projection. Waiting fails on `failed`/`cancelled` and
+reports the durable error code. Plain operation inspection prints failed status
+without turning the read itself into a failed command.
+
+Create and branch creation send one UUIDv7 Idempotency-Key per attempt. The key
+is shown before the request (in structured stderr progress when using JSON) and
+included with native JSON receipts. Preserve stderr when the response can be
+lost: stdout remains one error object on failure. To repeat an attempt after an
+uncertain network outcome, preserve the key and exact request:
+`nrz db create --name primary --idempotency-key <UUIDv7>`. No mutation is retried
+automatically.
+
+`nrz db operation <OPERATION_ID> --database <DATABASE_UUID> [--wait]` reads the
+receipt without requiring a live database list/detail or connection read. A
+UUID in `[db].database` works after deletion as well. Receipt reads recheck API
+permissions; denied requests do not fall back to other endpoints.
 
 Interactive project selection (`nrz link` and unlinked `nrz deploy`) reads all
 project pages. Missing or repeated pages produce an error instead of presenting

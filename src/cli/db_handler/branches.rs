@@ -49,18 +49,37 @@ pub(super) async fn cmd_branches_create(
     db_id: &str,
     json: bool,
     name: &str,
+    idempotency_key: Option<uuid::Uuid>,
 ) -> anyhow::Result<()> {
-    let branch: Branch = client
+    let key = idempotency_key.unwrap_or_else(uuid::Uuid::now_v7);
+    output::status(
+        json,
+        "~",
+        format!("Branch attempt: --idempotency-key {key}"),
+        output::Phase::Db,
+    );
+    let response = client
         .create_database_branch(
             db_id,
             nrz_api::BranchRequestBody2 {
                 name: name.to_string(),
                 ..Default::default()
             },
+            key,
         )
         .await
-        .context("failed to create branch")?
-        .into();
+        .context("failed to create branch")?;
+    let branch: Branch = match response {
+        nrz_api::Branch200Response3::Object(value) => value.into(),
+        nrz_api::Branch200Response3::Object2(value) => {
+            let operation = DatabaseOperation::from(value).with_key(key);
+            operation.verify_database(db_id)?;
+            operation.verify_type(OperationType::BranchCreate)?;
+            operation.check_outcome()?;
+            print_operation(&operation, json);
+            return Ok(());
+        }
+    };
 
     if json {
         output::json_output(&branch);
@@ -85,10 +104,21 @@ pub(super) async fn cmd_branches_delete(
         .delete_database_branch(db_id, &branch_id)
         .await
         .context("failed to delete branch")?;
-    anyhow::ensure!(
-        response.status == "deleted",
-        "branch deletion was not accepted"
-    );
+    match response {
+        nrz_api::Database200Response4::Object(value) => {
+            let operation = DatabaseOperation::from(value);
+            operation.verify_database(db_id)?;
+            operation.verify_type(OperationType::BranchDelete)?;
+            operation.verify_branch(&branch_id)?;
+            operation.check_outcome()?;
+            print_operation(&operation, json);
+            return Ok(());
+        }
+        nrz_api::Database200Response4::Status(value) => anyhow::ensure!(
+            value.status == "deleted",
+            "branch deletion was not accepted"
+        ),
+    }
 
     if json {
         output::json_output(&serde_json::json!({"deleted": branch_id}));

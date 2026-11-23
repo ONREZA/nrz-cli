@@ -26,6 +26,7 @@
   "getV1KaikiDatabasesByIdBranchesByBranchId",
   "getV1KaikiDatabasesByIdBranchesByBranchIdConnection",
   "getV1KaikiDatabasesByIdConnection",
+  "getV1KaikiDatabasesByIdOperationsByOperationId",
   "getV1KvV2Regions",
   "getV1KvV2Stores",
   "getV1KvV2StoresByStoreId",

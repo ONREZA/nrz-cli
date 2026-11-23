@@ -102,8 +102,8 @@ impl From<nrz_api::Database200Response3> for DbInfoResponse {
     }
 }
 
-impl From<nrz_api::Database200Response2> for CreateResponse {
-    fn from(value: nrz_api::Database200Response2) -> Self {
+impl From<nrz_api::Database200Response2Object> for CreateResponse {
+    fn from(value: nrz_api::Database200Response2Object) -> Self {
         Self {
             id: value.id.to_string(),
             product_id: value.product_id.map(|id| id.to_string()),
@@ -123,8 +123,8 @@ impl From<nrz_api::ManagedDatabaseBranchListItem> for Branch {
         }
     }
 }
-impl From<nrz_api::Branch200Response3> for Branch {
-    fn from(value: nrz_api::Branch200Response3) -> Self {
+impl From<nrz_api::Branch200Response3Object> for Branch {
+    fn from(value: nrz_api::Branch200Response3Object) -> Self {
         Self {
             id: value.id,
             name: value.name,
