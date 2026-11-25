@@ -11,10 +11,11 @@ description: Use when users need to deploy ONREZA projects with nrz, troubleshoo
 - Compute mismatch (`static`, `process`)
 
 ## Standard workflow
-1. Detect framework and persist it:
+1. Inspect the local build/deploy configuration without fetching platform settings:
 ```bash
-nrz detect --save
+nrz config explain --local
 ```
+Use `nrz detect` to see what the CLI auto-detects. Use `nrz detect --save` only if you intend to update `[project].framework` in an existing `onreza.toml`; review the diff before deploying.
 2. Validate build output:
 ```bash
 nrz build
@@ -27,6 +28,8 @@ nrz deploy
 # CI/non-interactive
 nrz deploy --environment production --project-id <project_id> --json --token "$NRZ_TOKEN" --workspace <workspace_slug>
 ```
+
+To validate a deployment plan without publishing, run `nrz deploy --dry --json`. Unlike `nrz config explain --local`, dry deploy can run the project's build and ONREZA Functions preflight.
 
 ## Troubleshooting map
 - Build output or manifest issue:
