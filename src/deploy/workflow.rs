@@ -190,8 +190,9 @@ async fn run_mode(
                             .any(|caller| caller.service_id.is_none())
                     })
                 });
-        let service_id = if let Some(runner) = &runner_context {
-            runner.context.service_id.clone()
+        let resolved_context;
+        let execution_context = if let Some(runner) = &runner_context {
+            Some(&runner.context)
         } else if requires_service {
             let project_id = early_project_id.as_deref().context(
                 "dry-run caller declarations require a linked Product and exact Environment",
@@ -200,7 +201,7 @@ async fn run_mode(
                 .environment
                 .as_deref()
                 .or(args.prod.then_some("production"));
-            crate::execution_context::resolve_for_service_mutation(
+            resolved_context = crate::execution_context::resolve_for_service_mutation(
                 &client,
                 project_id,
                 &command_context.project_dir,
@@ -208,22 +209,26 @@ async fn run_mode(
                 git_cmd(&["rev-parse", "--abbrev-ref", "HEAD"]).as_deref(),
                 args.service_id.as_deref(),
             )
-            .await?
-            .service_id
+            .await?;
+            Some(&resolved_context)
         } else {
-            String::new()
+            None
         };
+        let service_id = execution_context.map_or("", |context| context.service_id.as_str());
+        let target_production = execution_context
+            .map(|context| context.environment_type == "PRODUCTION")
+            .or_else(|| args.prod.then_some(true));
         let mut deploy_plan = plan::build(plan::DeployPlanRequest {
             args: &args,
             command: &command_context,
             explicit_compute,
             build_logs: None,
             execution_env: &[],
-            target_production: args.prod.then_some(true),
+            target_production,
             platform_runner: edge_build_handoff.is_some(),
         })
         .await?;
-        deploy_plan.apply_endpoint_declarations(&command_context.config, &service_id)?;
+        deploy_plan.apply_endpoint_declarations(&command_context.config, service_id)?;
         let frozen = tempfile::Builder::new()
             .prefix("nrz-dry-source-v2-")
             .tempdir()
