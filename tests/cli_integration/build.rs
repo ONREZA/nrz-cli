@@ -480,7 +480,13 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
 
 #[test]
 fn deploy_saved_service_reaches_dry_resolution_and_admission_with_explicit_override() {
-    use axum::{Json, Router, http::StatusCode, routing::post};
+    use axum::{
+        Json, Router,
+        extract::Query,
+        http::StatusCode,
+        routing::{get, post},
+    };
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use uuid::Uuid;
 
@@ -497,6 +503,10 @@ fn deploy_saved_service_reaches_dry_resolution_and_admission_with_explicit_overr
                 saved_service
             };
             fs::write(temp.path().join("index.html"), "<h1>local</h1>").unwrap();
+            for dir in ["saved-output", "explicit-output"] {
+                fs::create_dir(temp.path().join(dir)).unwrap();
+                fs::write(temp.path().join(dir).join("index.html"), dir).unwrap();
+            }
             fs::write(
                 temp.path().join("onreza.toml"),
                 format!("[project]\nid='{project}'\n"),
@@ -504,6 +514,7 @@ fn deploy_saved_service_reaches_dry_resolution_and_admission_with_explicit_overr
             .unwrap();
             let calls = Arc::new(Mutex::new(Vec::<(String, serde_json::Value)>::new()));
             let resolutions = calls.clone();
+            let settings_reads = calls.clone();
             let admissions = calls.clone();
             let unexpected = calls.clone();
             let app = Router::new()
@@ -522,6 +533,35 @@ fn deploy_saved_service_reaches_dry_resolution_and_admission_with_explicit_overr
                         Json(json!({"protocolVersion": "execution-context-v3", "context": context}))
                     }
                 }))
+                .route(
+                    &format!("/v1/projects/{project}"),
+                    get(move |Query(query): Query<HashMap<String, String>>| {
+                        let service = query.get("serviceId").and_then(|id| id.parse::<Uuid>().ok());
+                        settings_reads.lock().unwrap().push(("settings".into(), json!(service)));
+                        async move {
+                            let output = match service {
+                                Some(id) if id == saved_service => "saved-output",
+                                Some(id) if id == explicit_service => "explicit-output",
+                                _ => "unexpected-output",
+                            };
+                            Json(nrz_api::Project200Response3 {
+                                id: project,
+                                name: "project".into(),
+                                application: Some(nrz_api::Project200Response3Application {
+                                    service_id: service.unwrap_or_default(),
+                                    source_id: project,
+                                    ..Default::default()
+                                }),
+                                node_version: Some("NODE_22".into()),
+                                package_manager: Some(nrz_api::ServiceRequestBodyPackageManager::Npm),
+                                root_directory: Some(".".into()),
+                                output_directory: Some(output.into()),
+                                output_directory_source: Some(nrz_api::ServiceRequestBodyInstallCommandSource::User),
+                                ..Default::default()
+                            })
+                        }
+                    }),
+                )
                 .route("/v1/projects/{id}/deployments/admit", post(move |Json(body): Json<serde_json::Value>| {
                     admissions.lock().unwrap().push(("admit".into(), body));
                     // Observe admission without starting a build or publishing artifacts.
@@ -570,6 +610,14 @@ fn deploy_saved_service_reaches_dry_resolution_and_admission_with_explicit_overr
             let terminal = stdout_json(&output);
             if dry {
                 assert_eq!(terminal["schemaVersion"], "DEPLOY_PLAN_V2");
+                let expected_dir = if explicit {
+                    "explicit-output"
+                } else {
+                    "saved-output"
+                };
+                let output_dir =
+                    std::path::Path::new(terminal["build"]["outputDir"].as_str().unwrap());
+                assert_eq!(output_dir.file_name().unwrap(), expected_dir);
             } else {
                 assert_eq!(terminal["code"], "FORBIDDEN");
                 assert!(
@@ -580,13 +628,16 @@ fn deploy_saved_service_reaches_dry_resolution_and_admission_with_explicit_overr
                 );
             }
             let calls = calls.lock().unwrap();
-            assert_eq!(calls.len(), if dry { 2 } else { 3 }, "{calls:?}");
+            assert_eq!(calls.len(), 3, "{calls:?}");
             assert_eq!(calls[0].0, "resolve");
             assert_eq!(calls[0].1["serviceId"], saved_service.to_string());
             assert_eq!(calls[1].0, "resolve");
             assert_eq!(calls[1].1["serviceId"], selected.to_string());
             assert_eq!(calls[1].1["selectionSource"], "REPOSITORY");
-            if !dry {
+            if dry {
+                assert_eq!(calls[2].0, "settings");
+                assert_eq!(calls[2].1, json!(selected));
+            } else {
                 assert_eq!(calls[2].0, "admit");
                 assert_eq!(calls[2].1["serviceId"], selected.to_string());
                 assert_eq!(

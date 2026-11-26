@@ -132,6 +132,8 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 повторный запуск заново разрешает context.
 После admission server-origin build settings обновляются из frozen runner snapshot.
 Явные CLI/onreza.toml overrides и локальный выбор DIR/`--app` сохраняют приоритет.
+`deploy --dry` без admission читает текущие настройки Service (включая выбор
+через `--service-id` или сохранённый context), а не snapshot будущего деплоя.
 
 ## Верхнеуровневые команды
 
