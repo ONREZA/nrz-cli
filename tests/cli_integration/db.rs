@@ -222,12 +222,15 @@ fn native_create_wait_reports_accepted_receipt_before_failed_observation() {
         if mode == "--json" {
             assert!(stdout_json(&output)["error"].is_string());
             assert!(
-                stderr.lines().any(|line| {
-                    serde_json::from_str::<Value>(line).is_ok_and(|frame| {
-                        frame["p"] == "db"
-                            && frame["details"] == json!({"operationId": OP, "databaseId": DB})
-                    })
-                }),
+                stderr
+                    .lines()
+                    .filter_map(|line| line.strip_prefix('\u{1e}'))
+                    .any(|line| {
+                        serde_json::from_str::<Value>(line).is_ok_and(|frame| {
+                            frame["p"] == "db"
+                                && frame["details"] == json!({"operationId": OP, "databaseId": DB})
+                        })
+                    }),
                 "{stderr}"
             );
         } else {
@@ -237,7 +240,11 @@ fn native_create_wait_reports_accepted_receipt_before_failed_observation() {
         assert_eq!(
             *calls.lock().unwrap(),
             vec![
-                ("POST".into(), "/v1/kaiki/databases/".into(), Some(KEY.into())),
+                (
+                    "POST".into(),
+                    "/v1/kaiki/databases/".into(),
+                    Some(KEY.into())
+                ),
                 (
                     "GET".into(),
                     format!("/v1/kaiki/databases/{DB}/operations/{OP}"),
