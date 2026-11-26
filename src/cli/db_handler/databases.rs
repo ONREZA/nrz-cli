@@ -84,6 +84,7 @@ pub(super) async fn cmd_create(
             operation.verify_type(OperationType::DatabaseCreate)?;
             operation.check_outcome()?;
             if wait {
+                operation.report_pending_create(json);
                 operation = wait_operation(client, operation).await?;
             }
             print_operation(&operation, json);

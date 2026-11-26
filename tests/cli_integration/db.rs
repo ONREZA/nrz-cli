@@ -24,12 +24,25 @@ fn receipt(kind: &str, status: &str) -> Value {
 }
 
 fn fixture(status: u16, response: Value) -> (String, Calls) {
+    fixture_with_observation(
+        status,
+        response,
+        (StatusCode::OK, receipt("database.create", "succeeded")),
+    )
+}
+
+fn fixture_with_observation(
+    status: u16,
+    response: Value,
+    observation: (StatusCode, Value),
+) -> (String, Calls) {
     let calls: Calls = Default::default();
     let observed = calls.clone();
     let app = Router::new().fallback(
         move |method: Method, uri: Uri, headers: HeaderMap, _: Bytes| {
             let calls = observed.clone();
             let response = response.clone();
+            let (observation_status, observation_body) = observation.clone();
             async move {
                 assert_eq!(headers["X-API-Key"], "db-fixture-token");
                 calls.lock().unwrap().push((
@@ -41,10 +54,7 @@ fn fixture(status: u16, response: Value) -> (String, Calls) {
                 ));
                 // A pending Create is followed only through its durable receipt.
                 if method == Method::GET && status == 202 {
-                    (
-                        StatusCode::OK,
-                        Json(receipt("database.create", "succeeded")),
-                    )
+                    (observation_status, Json(observation_body))
                 } else {
                     (StatusCode::from_u16(status).unwrap(), Json(response))
                 }
@@ -192,6 +202,50 @@ fn native_create_wait_and_deleted_database_observation_use_only_receipt_get() {
     assert!(output.status.success());
     assert_eq!(stdout_json(&output)["operationId"], OP);
     assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn native_create_wait_reports_accepted_receipt_before_failed_observation() {
+    for mode in ["--json", "--human"] {
+        let (api, calls) = fixture_with_observation(
+            202,
+            receipt("database.create", "pending"),
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"code": "SERVICE_UNAVAILABLE", "message": "temporarily unavailable"}),
+            ),
+        );
+        let args = ["create", "--wait", "--idempotency-key", KEY];
+        let output = run(&api, &args, mode);
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if mode == "--json" {
+            assert!(stdout_json(&output)["error"].is_string());
+            assert!(
+                stderr.lines().any(|line| {
+                    serde_json::from_str::<Value>(line).is_ok_and(|frame| {
+                        frame["p"] == "db"
+                            && frame["details"] == json!({"operationId": OP, "databaseId": DB})
+                    })
+                }),
+                "{stderr}"
+            );
+        } else {
+            assert!(output.stdout.is_empty());
+            assert!(stderr.contains(&format!("nrz db operation {OP} --database {DB} --wait")));
+        }
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![
+                ("POST".into(), "/v1/kaiki/databases/".into(), Some(KEY.into())),
+                (
+                    "GET".into(),
+                    format!("/v1/kaiki/databases/{DB}/operations/{OP}"),
+                    None,
+                ),
+            ]
+        );
+    }
 }
 
 #[test]
