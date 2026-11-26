@@ -114,3 +114,56 @@ async fn preview_readiness_respects_retry_after_and_total_deadline() {
     assert!(result.is_err());
     assert_eq!(calls, 1);
 }
+
+#[tokio::test]
+async fn post_activation_verification_errors_preserve_observed_live_deployment() {
+    use super::activation::{ActivationWait, wait_for_activation};
+    use super::verify::{DeployVerificationRequest, verify_deployment};
+    use axum::{Router, http::StatusCode, routing::get};
+    use serde_json::json;
+    use std::time::Duration;
+
+    const ID: &str = "00000000-0000-0000-0000-000000000001";
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let app = Router::new().route("/", get(|| async { StatusCode::SERVICE_UNAVAILABLE }));
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let client =
+        crate::api::ApiClient::with_http_client(url.clone(), reqwest::Client::new()).unwrap();
+
+    for (address, code, status_code) in [
+        (Some(url.as_str()), "DEPLOY_VERIFY_FAILED", json!(503)),
+        (None, "DEPLOY_URL_UNAVAILABLE", serde_json::Value::Null),
+    ] {
+        let status = wait_for_activation(
+            ActivationWait {
+                deployment_id: ID,
+                timeout: Duration::from_secs(2),
+            },
+            || async {
+                serde_json::from_value(json!({"id": ID, "status": "live", "url": address}))
+                    .map_err(anyhow::Error::from)
+            },
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let error = verify_deployment(DeployVerificationRequest {
+            api_client: &client,
+            activation: &status,
+            project_id: ID,
+            health_check: None,
+            json: true,
+        })
+        .await
+        .unwrap_err();
+        let diagnostic = crate::errors::find_cli_error(&error).unwrap();
+        let envelope = serde_json::to_value(diagnostic.json()).unwrap();
+        assert_eq!(envelope["code"], code);
+        assert_eq!(envelope["details"]["deploymentId"], ID);
+        assert_eq!(envelope["details"]["lastKnownStatus"], "live");
+        assert_eq!(envelope["details"]["statusCode"], status_code);
+        assert!(error.to_string().contains(ID));
+    }
+    server.abort();
+}
