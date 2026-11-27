@@ -101,6 +101,28 @@ A diff containing only tests, generated code or no mutatable Rust produces no
 mutations; cargo-mutants may skip its baseline in that case. The ordinary
 `workspace:check` gate still runs the required test suite.
 
+## On-demand security checks
+
+```sh
+proto run moon -- run workspace:zizmor
+proto run moon -- run workspace:advisories-check
+```
+
+`workspace:zizmor` requires `uvx` from [uv](https://docs.astral.sh/uv/) on
+`PATH`. The first run may download the pinned zizmor version. The scan reads
+this repository's GitHub workflows offline and reports each finding with its
+severity, confidence and source location. Exit codes 11–14 indicate findings.
+
+`workspace:advisories-check` refreshes the RustSec advisory database and checks
+the workspace's locked dependency graph. Review vulnerability and maintenance
+advisories by ID and dependency path. Findings at error severity make the task
+exit nonzero.
+
+Run these tasks explicitly when reviewing workflow or dependency changes.
+If tool startup, downloads, input collection or graph resolution fail,
+inspect the task error and rerun the scan after resolving it.
+`workspace:check` includes the existing Actionlint and license checks.
+
 ## Generated contracts
 
 The complete inputs needed by the CLI are included in this repository:

@@ -120,10 +120,19 @@ tasks:
     command: proto run actionlint
     toolchains: [system]
     inputs: [".github/**/*", ".prototools"]
+  zizmor:
+    command: uvx zizmor@1.33.1 --offline --collect=workflows --strict-collection .
+    toolchains: [system]
+    inputs: [".github/workflows/*", "moon.yml"]
+    options: {cache: false, runInCI: false, outputStyle: stream}
   licenses-check:
     command: cargo deny check licenses
     inputs: [".prototools", "Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "api/client/Cargo.toml", "deny.toml"]
     options: {cacheLifetime: "1h"}
+  advisories-check:
+    command: cargo deny --locked --workspace check advisories
+    inputs: [".prototools", ".moon/toolchains.yml", "Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "api/client/Cargo.toml", "deny.toml"]
+    options: {cache: false, runInCI: false, outputStyle: stream}
   cpd:
     command: bun node_modules/jscpd/run-jscpd.js --config .jscpd.json --fail-on-new-clones 0
     toolchains: [bun, javascript]
