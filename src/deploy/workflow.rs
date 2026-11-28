@@ -1,5 +1,40 @@
 use super::*;
 
+async fn fetch_build_settings(
+    client: &ApiClient,
+    project_id: &str,
+    service_id: Option<Uuid>,
+    json: bool,
+) -> anyhow::Result<Option<Box<ProjectBuildSettings>>> {
+    use crate::project_settings::ProjectSettingsFetch;
+
+    let settings =
+        crate::project_settings::fetch_for_effective_config(client, project_id, service_id).await?;
+    Ok(match settings {
+        ProjectSettingsFetch::Applied(info) => {
+            tracing::info!(
+                ?info.build_command,
+                ?info.build_command_source,
+                ?info.install_command,
+                ?info.install_command_source,
+                ?info.output_directory,
+                ?info.output_directory_source,
+                ?info.framework_preset,
+                "fetched project settings from server"
+            );
+            Some(info)
+        }
+        ProjectSettingsFetch::TransientFailure { message } => {
+            output::warn(
+                json,
+                format!("Could not fetch project settings: {message}. Using local configuration."),
+                output::Phase::Deploy,
+            );
+            None
+        }
+    })
+}
+
 pub async fn run(
     args: DeployArgs,
     json: bool,
@@ -129,44 +164,14 @@ async fn run_mode(
         args.service_id = crate::execution_context::saved_service_id(&command_context.project_dir)?;
     }
 
-    // Fetch project settings from server if project_id is known
-    let server_settings = if let Some(runner) = &runner_context {
-        Some(runner.settings.clone())
-    } else if args.service_id.is_some() {
-        // The admitted runner snapshot selects this Service before building.
-        None
-    } else if let Some(ref pid) = early_project_id {
-        match crate::project_settings::fetch_for_effective_config(&client, pid, None).await? {
-            crate::project_settings::ProjectSettingsFetch::Applied(info) => {
-                tracing::info!(
-                    ?info.build_command,
-                    ?info.build_command_source,
-                    ?info.install_command,
-                    ?info.install_command_source,
-                    ?info.output_directory,
-                    ?info.output_directory_source,
-                    ?info.framework_preset,
-                    "fetched project settings from server"
-                );
-                Some(*info)
-            }
-            crate::project_settings::ProjectSettingsFetch::TransientFailure { message } => {
-                output::warn(
-                    json,
-                    format!(
-                        "Could not fetch project settings: {message}. Using local configuration."
-                    ),
-                    output::Phase::Deploy,
-                );
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    if runner_context.is_none() {
-        command_context.apply_server_settings(server_settings.as_ref());
+    // Keep the existing default Service read. Exact Service dry runs read their
+    // settings after resolution; real deploys use the admitted snapshot.
+    if runner_context.is_none()
+        && args.service_id.is_none()
+        && let Some(project_id) = &early_project_id
+    {
+        let settings = fetch_build_settings(&client, project_id, None, json).await?;
+        command_context.apply_server_settings(settings.as_deref());
     }
 
     // Explicit compute intent is safe to resolve before build because it comes
@@ -200,7 +205,7 @@ async fn run_mode(
                 .environment
                 .as_deref()
                 .or(args.prod.then_some("production"));
-            crate::execution_context::resolve_for_service_mutation(
+            let service_id = crate::execution_context::resolve_for_service_mutation(
                 &client,
                 project_id,
                 &command_context.project_dir,
@@ -209,7 +214,18 @@ async fn run_mode(
                 args.service_id.as_deref(),
             )
             .await?
-            .service_id
+            .service_id;
+            if args.service_id.is_some() {
+                let settings = fetch_build_settings(
+                    &client,
+                    project_id,
+                    Some(service_id.parse().context("invalid resolved Service ID")?),
+                    json,
+                )
+                .await?;
+                command_context.apply_server_settings(settings.as_deref());
+            }
+            service_id
         } else {
             String::new()
         };
