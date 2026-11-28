@@ -48,6 +48,9 @@ async fn run_mode(
         .transpose()?;
     let resume_deployment_id = runner_resume_deployment_id.or(admitted_id);
     edge_handoff::validate_resume_arguments(&args)?;
+    if resume_deployment_id.is_none() && args.prod && args.environment.is_some() {
+        bail!("--prod conflicts with --environment; select one exact environment");
+    }
     ingress_v2::validate_configuration()?;
     let mut command_context = if resume_deployment_id.is_some() {
         crate::context::CommandContext::resolve_platform_root(&args.dir, config, json)?
@@ -276,9 +279,6 @@ async fn run_mode(
             materialized,
         )
     } else {
-        if args.prod && args.environment.is_some() {
-            bail!("--prod conflicts with --environment; select one exact environment");
-        }
         let selector = args
             .environment
             .as_deref()

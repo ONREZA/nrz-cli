@@ -100,6 +100,59 @@ fn npm_build_preset_installs_tools_without_changing_production_env_or_authored_c
 }
 
 #[test]
+fn deploy_rejects_conflicting_environment_selectors_before_requests() {
+    use axum::{Router, http::StatusCode};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("index.html"), "<h1>local</h1>").unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        format!("[project]\nid='{}'\n", uuid::Uuid::now_v7()),
+    )
+    .unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let observed = requests.clone();
+    let api = support::api_mock::spawn(Router::new().fallback(move || {
+        observed.fetch_add(1, Ordering::Relaxed);
+        async { StatusCode::FORBIDDEN }
+    }));
+    for dry in [false, true] {
+        let mut command = nrz();
+        let command = command
+            .env_clear()
+            .current_dir(temp.path())
+            .env("HOME", temp.path())
+            .env("NRZ_API_URL", &api)
+            .args([
+                "--json",
+                "--token",
+                "test-token",
+                "deploy",
+                "--skip-build",
+                "--skip-install",
+                "--prod",
+                "--environment",
+                "preview",
+            ]);
+        if dry {
+            command.arg("--dry");
+        }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "dry={dry}: {output:?}");
+        assert_eq!(
+            stdout_json(&output)["error"],
+            "--prod conflicts with --environment; select one exact environment",
+            "dry={dry}"
+        );
+        assert_eq!(requests.load(Ordering::Relaxed), 0, "dry={dry}");
+    }
+}
+
+#[test]
 fn deploy_app_in_non_monorepo_fails() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(
