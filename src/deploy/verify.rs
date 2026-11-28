@@ -4,6 +4,7 @@ use anyhow::Context;
 use reqwest::header::{COOKIE, HeaderValue, LOCATION, RETRY_AFTER, SET_COOKIE};
 use serde::Serialize;
 
+use super::activation::DeploymentStatusResponse;
 use crate::api::ApiClient;
 use crate::errors::CliError;
 use crate::output;
@@ -13,9 +14,10 @@ const PREVIEW_ACCESS_READY_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(super) struct DeployVerificationRequest<'a> {
     pub(super) api_client: &'a ApiClient,
-    pub(super) deployment_id: &'a str,
+    // The exact deployment status already observed as live, not the identity
+    // of the release a later Environment URL request may reach.
+    pub(super) activation: &'a DeploymentStatusResponse,
     pub(super) project_id: &'a str,
-    pub(super) url: &'a str,
     pub(super) health_check: Option<&'a super::ResolvedHealthCheck>,
     pub(super) json: bool,
 }
@@ -49,8 +51,23 @@ pub(super) async fn verify_deployment(
     request: DeployVerificationRequest<'_>,
 ) -> anyhow::Result<DeployVerificationOutput> {
     let path = verification_path(request.health_check);
-    let base_url = request.url.to_string();
-    let url = verification_url(&base_url, &path)?;
+    let activation = request.activation;
+    let base_url = activation.url.as_deref().ok_or_else(|| {
+        CliError::new(
+            "DEPLOY_URL_UNAVAILABLE",
+            format!(
+                "Deployment {} was observed live, but its Environment address is unavailable for verification",
+                activation.id
+            ),
+        )
+        .phase(output::Phase::Deploy)
+        .details(serde_json::json!({
+            "deploymentId": activation.id,
+            "lastKnownStatus": activation.status,
+        }))
+        .into_anyhow()
+    })?;
+    let url = verification_url(base_url, &path)?;
 
     output::status(
         request.json,
@@ -61,6 +78,7 @@ pub(super) async fn verify_deployment(
 
     let initial_response = fetch_verification_url(&url, None).await.map_err(|error| {
         verify_error(
+            activation,
             format!("failed to verify deployment URL: {error:#}"),
             &url,
             &path,
@@ -72,7 +90,7 @@ pub(super) async fn verify_deployment(
 
     let (response, access_secret_id, used_preview_bypass) =
         if needs_preview_bypass(&initial_response)
-            && super::access::read(request.api_client, request.deployment_id, &base_url)
+            && super::access::read(request.api_client, &activation.id, base_url)
                 .await
                 .context("failed to resolve URL protection for deploy verification")?
         {
@@ -115,6 +133,7 @@ pub(super) async fn verify_deployment(
 
     let response = response.map_err(|error| {
         verify_error(
+            activation,
             format!("failed to verify deployment URL: {error:#}"),
             &url,
             &path,
@@ -124,7 +143,7 @@ pub(super) async fn verify_deployment(
         )
     })?;
 
-    validate_response(&url, &path, &response, used_preview_bypass)?;
+    validate_response(activation, &url, &path, &response, used_preview_bypass)?;
 
     if let Some((secret_id, Err(error))) = revoke_result {
         return Err(CliError::new(
@@ -133,6 +152,8 @@ pub(super) async fn verify_deployment(
         )
         .phase(output::Phase::Deploy)
         .details(serde_json::json!({
+            "deploymentId": activation.id,
+            "lastKnownStatus": activation.status,
             "projectId": request.project_id,
             "secretId": secret_id,
             "url": url,
@@ -307,6 +328,7 @@ async fn fetch_verification_url(
 }
 
 fn validate_response(
+    activation: &DeploymentStatusResponse,
     url: &str,
     path: &str,
     response: &VerificationResponse,
@@ -331,6 +353,7 @@ fn validate_response(
     };
 
     Err(verify_error(
+        activation,
         message,
         url,
         path,
@@ -362,6 +385,7 @@ fn is_preview_auth_location(location: &str) -> bool {
 }
 
 fn verify_error(
+    activation: &DeploymentStatusResponse,
     message: String,
     url: &str,
     path: &str,
@@ -372,14 +396,17 @@ fn verify_error(
     CliError::new("DEPLOY_VERIFY_FAILED", message)
         .phase(output::Phase::Deploy)
         .details(serde_json::json!({
+            "deploymentId": activation.id,
+            "lastKnownStatus": activation.status,
             "url": url,
             "path": path,
             "statusCode": status_code,
             "location": location,
             "usedPreviewBypass": used_preview_bypass,
         }))
-        .hint(
-            "For preview deployments, verification uses a temporary `nrz preview access` bypass and revokes it after the check.",
-        )
+        .hint(format!(
+            "Deployment {} was observed live. Check its status before retrying. For preview deployments, verification uses a temporary `nrz preview access` bypass and revokes it after the check.",
+            activation.id
+        ))
         .into_anyhow()
 }

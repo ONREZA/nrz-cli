@@ -680,16 +680,11 @@ async fn run_mode(
             None
         };
         let verification = if args.verify {
-            let url = url.ok_or_else(|| output::coded_error(
-                "DEPLOY_URL_UNAVAILABLE",
-                "Deployment is active, but its Environment address is unavailable for verification",
-            ))?;
             Some(
                 verify::verify_deployment(verify::DeployVerificationRequest {
                     api_client: &client,
-                    deployment_id: &deployment.id,
+                    activation: &status,
                     project_id: &project_id,
-                    url,
                     health_check: deploy_health_check.as_ref(),
                     json,
                 })
