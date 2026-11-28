@@ -50,6 +50,38 @@ fn fixture(compute: Option<&str>) -> tempfile::TempDir {
 }
 
 #[test]
+fn skipped_nextjs_build_does_not_materialize_an_adapter() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir(dir.path().join("out")).unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"prebuilt-nextjs","dependencies":{"next":"16.2.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("next.config.mjs"),
+        "export default { output: 'export' };",
+    )
+    .unwrap();
+    fs::write(dir.path().join("out/index.html"), "<h1>prebuilt</h1>").unwrap();
+    fs::write(
+        dir.path().join("onreza.toml"),
+        "[build]\noutput_directory = 'out'\n[deploy]\ncompute = 'static'\n",
+    )
+    .unwrap();
+
+    let output = deploy_dry(&dir);
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(stdout_json(&output)["compute"], "STATIC");
+    assert!(!dir.path().join(".onreza/cache/next-adapter").exists());
+}
+
+#[test]
 fn process_flag_replaces_inferred_static_output_with_compute_artifact() {
     let dir = fixture(None);
     let output = nrz()

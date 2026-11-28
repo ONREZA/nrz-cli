@@ -561,7 +561,8 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     };
     let authored_install_executed = install.authored;
 
-    let build_preparation = if native_recipe.is_some() {
+    // Prebuilt deploys consume the existing output without preparing a build adapter.
+    let build_preparation = if args.skip_build || native_recipe.is_some() {
         crate::frameworks::BuildPreparation::default()
     } else {
         crate::frameworks::prepare_build(project_dir)?
