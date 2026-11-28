@@ -76,6 +76,25 @@ impl DatabaseOperation {
     fn pending(&self) -> bool {
         matches!(self.status, Status::Pending | Status::Running)
     }
+    pub(super) fn report_pending_create(&self, json: bool) {
+        if !self.pending() {
+            return;
+        }
+        let id = self.operation_id;
+        let database = self.result.database_id;
+        let message = format!(
+            "Database creation accepted. Resume: nrz db operation {id} --database {database} --wait"
+        );
+        if json {
+            output::log_info_structured(
+                output::Phase::Db.as_str(),
+                &message,
+                &serde_json::json!({"operationId": id, "databaseId": database}),
+            );
+        } else {
+            output::status(false, "~", message, output::Phase::Db);
+        }
+    }
     pub(super) fn check_outcome(&self) -> anyhow::Result<()> {
         if matches!(self.status, Status::Failed | Status::Cancelled) {
             bail!(
