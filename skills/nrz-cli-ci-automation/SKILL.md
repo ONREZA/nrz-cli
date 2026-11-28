@@ -1,6 +1,6 @@
 ---
 name: nrz-cli-ci-automation
-description: Use when users build CI pipelines around nrz and need fully non-interactive, JSON-first automation for detect, build, env checks, and deploy.
+description: Use when users build CI pipelines around nrz and need fully non-interactive, JSON-first automation for config inspection, build, env checks, and deploy.
 ---
 
 # nrz CLI CI Automation
@@ -21,7 +21,7 @@ Produce deterministic CI steps for `nrz` with machine-readable output and no int
 ```bash
 set -euo pipefail
 
-nrz detect --save --json
+nrz config explain --local --json
 nrz build --json
 nrz env validate --environment production --project-id "$NRZ_PROJECT_ID" --json
 nrz deploy \
@@ -41,5 +41,6 @@ nrz logs --project-id "$NRZ_PROJECT_ID" --limit 200 --json
 
 ## Guardrails
 - Do not use `nrz login` in CI.
+- Use `nrz detect --json` to inspect auto-detection. Reserve `nrz detect --save` for intentional setup changes: it can overwrite `[project].framework` in `onreza.toml`. Review and commit any intended change before running CI.
 - Avoid interactive destructive operations without `--force`.
 - Keep `onreza.toml` as the source of truth for `build`, `deploy`, `env` declarations.
