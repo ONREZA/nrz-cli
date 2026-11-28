@@ -570,6 +570,8 @@ fn deploy_saved_service_reaches_dry_resolution_and_admission_with_explicit_overr
             let terminal = stdout_json(&output);
             if dry {
                 assert_eq!(terminal["schemaVersion"], "DEPLOY_PLAN_V2");
+                assert_eq!(terminal["target"]["environment"], "production");
+                assert_eq!(terminal["target"]["production"], true);
             } else {
                 assert_eq!(terminal["code"], "FORBIDDEN");
                 assert!(
